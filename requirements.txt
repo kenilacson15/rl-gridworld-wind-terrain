@@ -1,0 +1,19 @@
+# Core scientific stack
+numpy
+scipy
+matplotlib
+
+# RL and environment tools
+gymnasium
+
+# Jupyter for experimentation
+jupyter
+
+# Optional: tqdm for progress bars
+tqdm
+
+# Optional: seaborn for advanced plots
+seaborn
+
+# Optional: pandas for data analysis
+pandas
