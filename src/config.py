@@ -5,7 +5,7 @@ ENV_CONFIG: Dict[str, Any] = {
     "grid_size": (5, 5),                # (rows, cols)
     "start_pos": (0, 0),                # Starting position (row, col)
     "goal_pos": (4, 4),                 # Goal position (row, col)
-    "wind": [0, 0, 1, 0, 0],            # Wind strength per column
+    "wind": [0, 0, 1, 0, 0],            # Wind strength per column (0 = no wind)
     "stochastic_terrain": {             # Terrain types and their probabilities
         "ice": 0.2,                     # 20% chance to slip on ice
         "swamp": 0.5                    # 50% chance to slow movement on swamp
@@ -14,15 +14,15 @@ ENV_CONFIG: Dict[str, Any] = {
 
 # ====== Agent/Algorithm Configuration ======
 AGENT_CONFIG: Dict[str, Any] = {
-    "gamma": 0.95,          # Discount factor
+    "gamma": 0.95,          # Discount factor for future rewards
     "theta": 1e-6,          # Convergence threshold for Value Iteration
     "max_iterations": 1000, # Max iterations for planning algorithms
 }
 
 # ====== Paths for Data/Models ======
 PATHS: Dict[str, str] = {
-    "data": "data/processed/gridworld_v1.pkl",
-    "models": "models/trained/value_iteration_optimal.pkl",
+    "data": "data/processed/gridworld_v1.pkl",   # Path to processed data
+    "models": "models/trained/value_iteration_optimal.pkl", # Path to saved models
 }
 
 # ====== Multi-Environment Support ======
