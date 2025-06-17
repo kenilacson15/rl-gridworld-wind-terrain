@@ -2,7 +2,7 @@ from gym import Env
 from gym.spaces import Discrete, Box
 import numpy as np
 
-class GridworldEnv(Env):
+class GridWorldEnv(Env):
     """
     In this implementation, I define a custom Gridworld environment compatible with OpenAI Gym.
     This environment simulates a 2D grid where an agent must navigate from a start position to a goal,
@@ -27,7 +27,7 @@ class GridworldEnv(Env):
             - "goal_pos": Tuple with goal coordinates
             - "start_pos": Tuple with starting coordinates
         """
-        super(GridworldEnv, self).__init__()
+        super(GridWorldEnv, self).__init__()
 
         # Default configuration
         self.config = config or {
