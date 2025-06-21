@@ -6,7 +6,7 @@ from typing import Any, Dict, Tuple
 from tqdm import trange
 
 
-for iteration in trange(self.config["max_iterations"]):
+
 
 
 class PolicyIterationAgent:
@@ -29,7 +29,7 @@ class PolicyIterationAgent:
     def policy_iteration(self):
         gamma = self.config["gamma"]
         theta = self.config["theta"]
-        white True:
+        while True:
         old_V = self.V.copy()
 
         best_actions = self.policy
