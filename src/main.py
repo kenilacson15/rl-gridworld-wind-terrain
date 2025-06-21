@@ -2,10 +2,13 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from envs.gridworld import GridWorldEnv
 from agents.value_iteration import ValueIterationAgent
+from agents.policy_iteration import PolicyIterationAgent
 from config import ENV_CONFIG, AGENT_CONFIG
 
 
 env = GridWorldEnv(config=ENV_CONFIG)
+agent = PolicyIterationAgent(env, AGENT_CONFIG)
+agent.run_policy_iteration()
 
 episode_rewards = []
 episode_steps = []
