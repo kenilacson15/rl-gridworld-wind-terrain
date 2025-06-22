@@ -13,10 +13,12 @@ ENV_CONFIG: Dict[str, Any] = {
 }
 
 # ====== Agent/Algorithm Configuration ======
-AGENT_CONFIG: Dict[str, Any] = {
-    "gamma": 0.95,          # Discount factor for future rewards
-    "theta": 1e-6,          # Convergence threshold for Value Iteration
-    "max_iterations": 1000, # Max iterations for planning algorithms
+AGENT_CONFIG = {
+    "alpha": 0.1,         # Learning rate
+    "gamma": 0.99,        # Discount factor
+    "epsilon": 0.1,       # Exploration rate
+    "min_epsilon": 0.01,  # Minimum exploration rate (for decay)
+    "decay_rate": 0.995   # Epsilon decay rate
 }
 
 # ====== Paths for Data/Models ======

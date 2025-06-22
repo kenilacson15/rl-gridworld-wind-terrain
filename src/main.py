@@ -1,30 +1,21 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from envs.gridworld import GridWorldEnv
-from agents.value_iteration import ValueIterationAgent
-from agents.policy_iteration import PolicyIterationAgent
+from agents.q_learning import QLearningAgent
 from config import ENV_CONFIG, AGENT_CONFIG
 
-
+# Initialize environment and agent
 env = GridWorldEnv(config=ENV_CONFIG)
-agent = PolicyIterationAgent(env, AGENT_CONFIG)
-agent.run_policy_iteration()
+agent = QLearningAgent(env, AGENT_CONFIG)
+
+num_episodes = 50
+train_episodes = 1000
+
+# Train the agent
+agent.train(num_episodes=train_episodes)
 
 episode_rewards = []
 episode_steps = []
-
-
-
-obs = env.reset()
-
-
-done = False
-
-
-step_count = 0
-total_reward = 0
-
-num_episodes = 50
 
 def plot_gridworld(env):
     plt.clf()
@@ -55,35 +46,27 @@ for episode in range(num_episodes):
     done = False
     step_count = 0
     total_reward = 0
-
     while not done:
         plot_gridworld(env)
-        action = env.action_space.sample()
+        action = agent.act(obs)
         obs, reward, done, info = env.step(action)
         step_count += 1
         total_reward += reward
+    episode_rewards.append(total_reward)
+    episode_steps.append(step_count)
 
 plt.ioff()
 plot_gridworld(env)
 plt.show()
 
-episode_rewards.append(total_reward)
-episode_steps.append(step_count)
-
-
-
 print(f"Episode finished in {step_count} steps with total reward {total_reward}")
 
-
 plt.figure(figsize=(10, 4))
-
-
 plt.subplot(1, 2, 1)
 plt.plot(episode_rewards, marker='o')
 plt.title("Total Reward per Episode")
 plt.xlabel("Episode")
 plt.ylabel("Total Reward")
-
 
 plt.subplot(1, 2, 2)
 plt.plot(episode_steps, marker='x', color='orange')
