@@ -47,7 +47,7 @@ class QLearningAgent:
             target_q = reward
         
         else:
-            max_q_next = np.max(self.Q[next_state[0], next state[1]])
+            max_q_next = np.max(self.Q[next_state[0], next_state[1]])
             target_q = reward + self.gamma * max_q_next
 
         self.Q[state[0], state[1], action] = (

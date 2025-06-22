@@ -52,15 +52,26 @@ for episode in range(num_episodes):
         obs, reward, done, info = env.step(action)
         step_count += 1
         total_reward += reward
-    episode_rewards.append(total_reward)
-    episode_steps.append(step_count)
+
+    episode_rewards.append(total_reward)  
+    episode_steps.append(step_count)    
+        
+
+avg_reward = sum(episode_rewards) / len(episode_rewards)
+avg_steps = sum(episode_steps) / len(episode_steps)
+
+  
+
+
+print(f"Average reward across {num_episodes} episodes: {avg_reward:.2f}")
+print(f"Average steps across {num_episodes} episodes: {avg_steps:.2f}")
+
+
+
 
 plt.ioff()
 plot_gridworld(env)
 plt.show()
-
-print(f"Episode finished in {step_count} steps with total reward {total_reward}")
-
 plt.figure(figsize=(10, 4))
 plt.subplot(1, 2, 1)
 plt.plot(episode_rewards, marker='o')
