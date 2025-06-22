@@ -29,12 +29,6 @@ class QLearningAgent:
 
 
 
-
-
-        self.Q[state[0], state[1], action] = (1 - alpha) * self.Q[state[0], state[1], action] + \ alpha * (reward + gamma * np.max(self.Q[next_state[0], next_state[1]]))
-
-
-
     def act(self, state):
         if np.random.rand() < self.epsilon:
             return self.env.action_space.sample()
@@ -48,13 +42,21 @@ class QLearningAgent:
         max_q_next = np.max(self.Q[next_state[0], next_state[1]])
         target_q = reward + (0 if done else self.gamma * max_q_next)
 
+
+        if done:
+            target_q = reward
+        
+        else:
+            max_q_next = np.max(self.Q[next_state[0], next state[1]])
+            target_q = reward + self.gamma * max_q_next
+
         self.Q[state[0], state[1], action] = (
         (1 - self.alpha) * current_q + self.alpha * target_q
         )
 
 
 
-def _decay_epsilon(self):
-    if self.epsilon > self.config["min_epsilon"]:
-        self.epsilon *= self.config["decay_rate"]
+    def _decay_epsilon(self):
+        if self.epsilon > self.config["min_epsilon"]:
+            self.epsilon *= self.config["decay_rate"]
 
