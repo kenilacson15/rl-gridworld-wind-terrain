@@ -1,3 +1,4 @@
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from envs.gridworld import GridWorldEnv
@@ -14,8 +15,11 @@ train_episodes = 1000
 # Train the agent
 agent.train(num_episodes=train_episodes)
 
-episode_rewards = []
-episode_steps = []
+metrics = {
+    "rewards": [],
+    "steps": [],
+    "successes": []
+}
 
 def plot_gridworld(env):
     plt.clf()
@@ -53,12 +57,24 @@ for episode in range(num_episodes):
         step_count += 1
         total_reward += reward
 
-    episode_rewards.append(total_reward)  
-    episode_steps.append(step_count)    
+        
         
 
-avg_reward = sum(episode_rewards) / len(episode_rewards)
-avg_steps = sum(episode_steps) / len(episode_steps)
+    metrics["rewards"].append(total_reward)
+    metrics["steps"].append(step_count)
+
+
+    
+    success = 1 if tuple(obs) == tuple(env.config["goal_pos"]) else 0
+    
+    metrics["successes"].append(success)
+    
+
+
+avg_reward = np.mean(metrics["rewards"])
+avg_steps = np.mean(metrics["steps"])
+success_rate = np.mean(metrics["successes"])
+
 
   
 
@@ -74,16 +90,19 @@ plot_gridworld(env)
 plt.show()
 plt.figure(figsize=(10, 4))
 plt.subplot(1, 2, 1)
-plt.plot(episode_rewards, marker='o')
+plt.plot(metrics["rewards"], marker='o')
 plt.title("Total Reward per Episode")
 plt.xlabel("Episode")
 plt.ylabel("Total Reward")
-
 plt.subplot(1, 2, 2)
-plt.plot(episode_steps, marker='x', color='orange')
+plt.plot(metrics["steps"], marker='x', color='orange')
 plt.title("Steps per Episode")
 plt.xlabel("Episode")
 plt.ylabel("Steps")
-
+plt.figure(figsize=(5, 4))
+plt.plot(metrics["successes"], marker='o', color='green')
+plt.title("Success per Episode (1 = success, 0 = fail)")
+plt.xlabel("Episode")
+plt.ylabel("Success")
 plt.tight_layout()
 plt.show()
