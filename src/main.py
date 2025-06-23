@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.gridspec import GridSpec
 from envs.gridworld import GridWorldEnv
 from agents.q_learning import QLearningAgent
 from config import DEFAULT_ENV_CONFIG, QL_AGENT_CONFIG
@@ -21,8 +22,7 @@ metrics = {
     "successes": []
 }
 
-def plot_gridworld(env, agent=None, fig=None, ax=None, terrain_seed=42):
-    # Deterministic terrain for consistent visualization
+def plot_gridworld(env, agent=None, fig=None, ax=None, terrain_seed=42, show_q_heatmap=True, trajectory=None, episode=None, step=None, cbar_ax=None):
     rng = np.random.RandomState(terrain_seed)
     grid_height, grid_width = env.config["grid_size"]
     if fig is None or ax is None:
@@ -38,23 +38,32 @@ def plot_gridworld(env, agent=None, fig=None, ax=None, terrain_seed=42):
     ax.set_xticklabels([])
     ax.set_yticklabels([])
     ax.grid(True)
+    # Draw goal first (background)
+    goal_row, goal_col = env.config["goal_pos"]
+    ax.add_patch(patches.Rectangle((goal_col-0.3, goal_row-0.3), 0.6, 0.6, color='green', label='Goal', zorder=1))
     # Draw terrain (ice and swamp)
     for i in range(grid_height):
         for j in range(grid_width):
             if rng.rand() < env.config["stochastic_terrain"]["ice"]:
-                ax.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, color='lightblue', alpha=0.3))
+                ax.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, color='#b3e0ff', alpha=0.5, zorder=2))
             if rng.rand() < env.config["stochastic_terrain"]["swamp"]:
-                ax.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, color='darkgreen', alpha=0.3))
+                ax.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, color='#145a32', alpha=0.3, zorder=2))
     # Draw wind strength indicators
     for col, strength in enumerate(env.config["wind"]):
         if strength > 0:
-            ax.text(col, -0.7, f'↑{strength}', ha='center', fontsize=10)
-    # Draw agent
-    agent_row, agent_col = env.agent_pos
-    ax.add_patch(patches.Circle((agent_col, agent_row), 0.3, color='orange', label='Agent'))
-    # Draw goal
-    goal_row, goal_col = env.config["goal_pos"]
-    ax.add_patch(patches.Rectangle((goal_col-0.3, goal_row-0.3), 0.6, 0.6, color='green', label='Goal'))
+            ax.annotate(f'↑{strength}', (col, -0.7), ha='center', fontsize=12, color='navy', zorder=10)
+    # Draw Q-value heatmap if agent is provided
+    if agent is not None and hasattr(agent, 'Q') and show_q_heatmap:
+        q_max = np.max(agent.Q, axis=2)
+        im = ax.imshow(q_max, cmap='YlOrRd', alpha=0.3, origin='upper', extent=[-0.5, grid_width-0.5, grid_height-0.5, -0.5], zorder=3)
+        if cbar_ax is not None:
+            cbar_ax.clear()
+            plt.colorbar(im, cax=cbar_ax)
+            cbar_ax.set_ylabel('Max Q-value')
+    # Draw agent trajectory if provided
+    if trajectory is not None and len(trajectory) > 1:
+        traj = np.array(trajectory)
+        ax.plot(traj[:,1], traj[:,0], color='magenta', linewidth=2, alpha=0.7, label='Trajectory', zorder=11)
     # Draw policy arrows if agent is not None and has Q
     if agent is not None and hasattr(agent, 'Q'):
         for i in range(grid_height):
@@ -62,30 +71,41 @@ def plot_gridworld(env, agent=None, fig=None, ax=None, terrain_seed=42):
                 if (i, j) != tuple(env.config["goal_pos"]):
                     action = np.argmax(agent.Q[i, j])
                     dx, dy = 0, 0
-                    if action == 0: dy = 0.2  # up
-                    elif action == 1: dy = -0.2  # down
-                    elif action == 2: dx = -0.2  # left
-                    elif action == 3: dx = 0.2  # right
-                    ax.arrow(j, i, dx, dy, head_width=0.1, head_length=0.1, fc='blue', ec='blue', alpha=0.5)
-    # Add legend with terrain types
+                    if action == 0: dy = 0.25  # up
+                    elif action == 1: dy = -0.25  # down
+                    elif action == 2: dx = -0.25  # left
+                    elif action == 3: dx = 0.25  # right
+                    ax.arrow(j, i, dx, dy, head_width=0.13, head_length=0.13, fc='blue', ec='blue', alpha=0.6, zorder=8)
+    # Draw agent (on top)
+    agent_row, agent_col = env.agent_pos
+    ax.add_patch(patches.Circle((agent_col, agent_row), 0.3, color='orange', label='Agent', zorder=12))
+    # Add legend outside the grid
     legend_elements = [
         patches.Patch(color='orange', label='Agent'),
         patches.Patch(color='green', label='Goal'),
-        patches.Patch(color='lightblue', alpha=0.3, label='Ice'),
-        patches.Patch(color='darkgreen', alpha=0.3, label='Swamp')
+        patches.Patch(color='#b3e0ff', alpha=0.5, label='Ice'),
+        patches.Patch(color='#145a32', alpha=0.3, label='Swamp'),
+        patches.Patch(color='magenta', label='Trajectory')
     ]
-    ax.legend(handles=legend_elements, loc='upper right')
-    ax.set_title("GridWorld Environment")
+    ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1.02, 0.5), borderaxespad=0.)
+    # Add episode/step info
+    if episode is not None and step is not None:
+        ax.set_title(f"GridWorld | Episode {episode+1} | Step {step+1}")
+    else:
+        ax.set_title("GridWorld Environment")
     plt.tight_layout()
     if close_fig:
         plt.pause(0.1)
         plt.close(fig)
     else:
-        fig.canvas.draw()
+        fig.canvas.draw_idle()
         plt.pause(0.01)
 
-# Create persistent figures for visualization
-env_fig, env_ax = plt.subplots(figsize=(8, 8))
+# Create persistent figures for visualization with colorbar axis
+env_fig = plt.figure(figsize=(9, 8))
+gs = GridSpec(1, 2, width_ratios=[20, 1], figure=env_fig)
+env_ax = env_fig.add_subplot(gs[0])
+cbar_ax = env_fig.add_subplot(gs[1])
 metrics_fig, (reward_ax, steps_ax, success_ax) = plt.subplots(1, 3, figsize=(15, 4))
 
 plt.ion()
@@ -94,9 +114,10 @@ for episode in range(num_episodes):
     done = False
     step_count = 0
     total_reward = 0
+    trajectory = []  # Initialize trajectory for this episode
     while not done:
         if episode % 5 == 0:
-            plot_gridworld(env, agent, env_fig, env_ax)
+            plot_gridworld(env, agent, env_fig, env_ax, trajectory=trajectory, episode=episode, step=step_count, cbar_ax=cbar_ax)
             reward_ax.clear()
             steps_ax.clear()
             success_ax.clear()
@@ -121,6 +142,7 @@ for episode in range(num_episodes):
         obs, reward, done, info = env.step(action)
         step_count += 1
         total_reward += reward
+        trajectory.append(env.agent_pos)  # Append agent position to trajectory
     metrics["rewards"].append(total_reward)
     metrics["steps"].append(step_count)
     success = 1 if tuple(env.agent_pos) == tuple(env.config["goal_pos"]) else 0
