@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from envs.gridworld import GridWorldEnv
 from agents.q_learning import QLearningAgent
-from config import ENV_CONFIG, AGENT_CONFIG
+from config import DEFAULT_ENV_CONFIG, QL_AGENT_CONFIG
 
 # Initialize environment and agent
-env = GridWorldEnv(config=ENV_CONFIG)
-agent = QLearningAgent(env, AGENT_CONFIG)
+env = GridWorldEnv(config=DEFAULT_ENV_CONFIG)
+agent = QLearningAgent(env, QL_AGENT_CONFIG)
 
 num_episodes = 50
 train_episodes = 1000
@@ -51,7 +51,8 @@ for episode in range(num_episodes):
     step_count = 0
     total_reward = 0
     while not done:
-        plot_gridworld(env)
+        if episode % 10 == 0:
+            plot_gridworld(env)
         action = agent.act(obs)
         obs, reward, done, info = env.step(action)
         step_count += 1
