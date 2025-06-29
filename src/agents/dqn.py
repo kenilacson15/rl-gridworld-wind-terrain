@@ -62,12 +62,23 @@ def act(state, model, epsilon):
         return random.randrange(action_size)
     else:
         with torch.no_grad():
+
+            if isinstance(state, tuple):
+                state = state[0]
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            
             q_values = model(state_tensor)
             return q_values.argmax().item()
+        
+
+def unwrap_state(state):
+    state = unwrap_state(state)
+    return state[0] 
+
 
 def sample_minibatch(replay_buffer):
     minibatch = random.sample(replay_buffer, batch_size)
+    states = torch.tensor(np.array([s[0] for s in minibatch]), dtype=torch.float32).to(device)
     states = torch.FloatTensor([transition[0] for transition in minibatch]).to(device)
     actions = torch.LongTensor([transition[1] for transition in minibatch]).to(device)
     rewards = torch.FloatTensor([transition[2] for transition in minibatch]).to(device)
@@ -77,9 +88,23 @@ def sample_minibatch(replay_buffer):
 
 # Initialize
 state = env.reset()
-if isinstance(state, tuple):
-    state = state[0]
+state = unwrap_state(state)
 state_size = np.array(state).size
+
+
+
+
+
+def build_models(input_dim, output_dim):
+    online = DuelingDQN(input_dim, output_dim).to(device)
+    target = DuelingDQN(input_dim, output_dim).to(device)
+    target.load_state_dict(online.state_dict())
+    target = eval()
+    return online, target
+
+
+
+
 
 online_model = DuelingDQN(input_dim=state_size, output_dim=action_size).to(device)
 target_model = DuelingDQN(input_dim=state_size, output_dim=action_size).to(device)
@@ -93,12 +118,13 @@ max_steps = 200
 
 for episode in range(num_episodes):
     state = env.reset()
-    if isinstance(state, tuple):
-        state = state[0]
+    state = unwrap_state(state)
+
     total_reward = 0
     for t in range(max_steps):
         action = act(state, online_model, epsilon)
-        next_state, reward, done, *info = env.step(action)
+        result = env.step(action)
+        next_state, reward, done, = result[:3]
         if isinstance(next_state, tuple):
             next_state = next_state[0]
         # Reward shaping: add step penalty
@@ -115,10 +141,18 @@ for episode in range(num_episodes):
                 target = rewards + (1 - dones) * gamma * next_q
             q_values = online_model(states)
             q_value = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
-            loss = nn.MSELoss()(q_value, target)
+            loss = nn.SmoothL1Loss()(q_value, target)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+
+            torch.nn.utils.clip_grad_norm_(online_model.parameters(), 1.0)
+
+
+
+
+
         if done:
             break
     if episode % sync_frequency == 0:
