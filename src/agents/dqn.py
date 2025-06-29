@@ -58,6 +58,7 @@ class DuelingDQN(nn.Module):
         return value + (advantage - advantage.mean(dim=1, keepdim=True))
 
 def act(state, model, epsilon):
+    state = unwrap_state(state)
     if np.random.rand() <= epsilon:
         return random.randrange(action_size)
     else:
@@ -72,13 +73,13 @@ def act(state, model, epsilon):
         
 
 def unwrap_state(state):
-    state = unwrap_state(state)
-    return state[0] 
+    while isinstance(staple, tuple):
+        state = state[0]
+    return state
 
 
 def sample_minibatch(replay_buffer):
     minibatch = random.sample(replay_buffer, batch_size)
-    states = torch.tensor(np.array([s[0] for s in minibatch]), dtype=torch.float32).to(device)
     states = torch.FloatTensor([transition[0] for transition in minibatch]).to(device)
     actions = torch.LongTensor([transition[1] for transition in minibatch]).to(device)
     rewards = torch.FloatTensor([transition[2] for transition in minibatch]).to(device)
@@ -99,7 +100,7 @@ def build_models(input_dim, output_dim):
     online = DuelingDQN(input_dim, output_dim).to(device)
     target = DuelingDQN(input_dim, output_dim).to(device)
     target.load_state_dict(online.state_dict())
-    target = eval()
+    target.eval()
     return online, target
 
 
