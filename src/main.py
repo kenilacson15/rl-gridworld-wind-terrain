@@ -7,7 +7,7 @@ from collections import deque
 from envs.gridworld import GridWorldEnv
 from agents.q_learning import QLearningAgent
 from agents.dqn import DQN, act as dqn_act
-from config import DEFAULT_ENV_CONFIG, QL_AGENT_CONFIG
+from config import DEFAULT_ENV_CONFIG, QL_AGENT_CONFIG, DQN_AGENT_CONFIG
 from utils.plotting import (
     plot_gridworld,
     plot_final_metrics,
@@ -34,91 +34,74 @@ def record_metrics(metrics, reward, steps, goal_reached):
     metrics["successes"].append(1 if goal_reached else 0)
 
 # ======================== DQN Logic ==========================
-def train_dqn(env, metrics):
-    """Train a DQN agent."""
-    plotter = LivePlotter()
-    state = env.reset()
-    state = state[0] if isinstance(state, tuple) else state
-    state_size = np.array(state).size
-    action_size = env.action_space.n if hasattr(env, 'action_space') else 4
-    goal = tuple(env.config["goal_pos"])
-
-
-    # Initialize models
-    online_model = DQN(state_size, action_size).to(DEVICE)
-    target_model = DQN(state_size, action_size).to(DEVICE)
-    target_model.load_state_dict(online_model.state_dict())
-    target_model.eval()
-
-    optimizer = torch.optim.Adam(online_model.parameters(), lr=1e-3)
-    replay_buffer = deque(maxlen=10000)
-
-    # Training parameters
-    epsilon, epsilon_min, decay = 1.0, 0.01, 0.999
-    batch_size, sync_freq, gamma = 64, 10, 0.99
-
-    for ep in range(NUM_EPISODES):
-        state = env.reset()
-        state = state[0] if isinstance(state, tuple) else state
-        total_reward, done = 0, False
-
-        for t in range(MAX_STEPS):
-            # Select and execute action
-            flat_state = state if not isinstance(state, tuple) else state[0]
-            action = dqn_act(flat_state, online_model, epsilon)
-            next_state, reward, done, *_ = env.step(action)
-            next_state = next_state[0] if isinstance(next_state, tuple) else next_state
-            shaped_reward = reward + REWARD_STEP_PENALTY
-            replay_buffer.append((state, action, shaped_reward, next_state, float(done)))
-
-            state = next_state
-            total_reward += shaped_reward
-
-            # Train on replay buffer
-            if len(replay_buffer) >= batch_size:
-                minibatch = random.sample(replay_buffer, batch_size)
-                update_dqn(minibatch, online_model, target_model, optimizer, gamma)
-
-            if done:
-                break
-
-        # Sync target network periodically
-        if ep % sync_freq == 0:
-            target_model.load_state_dict(online_model.state_dict())
-
-        # Update exploration rate
-        epsilon = max(epsilon_min, epsilon * decay)
-        
-        # Record metrics
-        record_metrics(metrics, total_reward, t + 1, tuple(env.agent_pos) == goal)
-        plotter.update(metrics)
-        print(f"[DQN] Episode {ep} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.3f}")
-
-    return None, online_model  # agent=None for DQN
-
 def update_dqn(batch, online_model, target_model, optimizer, gamma):
     """Update DQN models using a batch of experiences (Double DQN)."""
-    # Prepare batch data
     states = torch.FloatTensor([s[0] for s in batch]).to(DEVICE)
     actions = torch.LongTensor([s[1] for s in batch]).to(DEVICE)
     rewards = torch.FloatTensor([s[2] for s in batch]).to(DEVICE)
     next_states = torch.FloatTensor([s[3] for s in batch]).to(DEVICE)
     dones = torch.FloatTensor([s[4] for s in batch]).to(DEVICE)
-
-    # Double DQN target
     with torch.no_grad():
         next_actions = online_model(next_states).argmax(1)
         next_q = target_model(next_states).gather(1, next_actions.unsqueeze(1)).squeeze(1)
         target = rewards + (1 - dones) * gamma * next_q
-
-    # Update online model
     q_values = online_model(states)
     q_selected = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
     loss = torch.nn.MSELoss()(q_selected, target)
-
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
+
+def train_dqn(env, metrics):
+    num_episodes = DQN_AGENT_CONFIG.get("num_episodes", NUM_EPISODES)
+    max_steps = DQN_AGENT_CONFIG.get("max_steps", MAX_STEPS)
+    plotter = LivePlotter()
+    state = env.reset()
+    state = unwrap_state(state)
+    state_size = np.array(state).size
+    action_size = env.action_space.n if hasattr(env, 'action_space') else 4
+    goal = tuple(env.config["goal_pos"])
+
+    # Initialize models from dqn.py
+    online_model = DQN(state_size, action_size, hidden_dim=DQN_AGENT_CONFIG["hidden_dim"]).to(DEVICE)
+    target_model = DQN(state_size, action_size, hidden_dim=DQN_AGENT_CONFIG["hidden_dim"]).to(DEVICE)
+    target_model.load_state_dict(online_model.state_dict())
+    target_model.eval()
+    optimizer = torch.optim.Adam(online_model.parameters(), lr=DQN_AGENT_CONFIG["learning_rate"])
+    replay_buffer = deque(maxlen=DQN_AGENT_CONFIG["buffer_size"])
+
+    epsilon = DQN_AGENT_CONFIG["epsilon_start"]
+    epsilon_min = DQN_AGENT_CONFIG["epsilon_min"]
+    decay = DQN_AGENT_CONFIG["epsilon_decay"]
+    batch_size = DQN_AGENT_CONFIG["batch_size"]
+    sync_freq = DQN_AGENT_CONFIG["sync_frequency"]
+    gamma = DQN_AGENT_CONFIG["gamma"]
+    reward_step_penalty = DQN_AGENT_CONFIG["reward_step_penalty"]
+
+    for ep in range(num_episodes):
+        state = env.reset()
+        state = unwrap_state(state)
+        total_reward, done = 0, False
+        for t in range(max_steps):
+            action = dqn_act(state, online_model, epsilon)
+            next_state, reward, done, *_ = env.step(action)
+            next_state = unwrap_state(next_state)
+            shaped_reward = reward + reward_step_penalty
+            replay_buffer.append((state, action, shaped_reward, next_state, float(done)))
+            state = next_state
+            total_reward += shaped_reward
+            if len(replay_buffer) >= batch_size:
+                minibatch = random.sample(replay_buffer, batch_size)
+                update_dqn(minibatch, online_model, target_model, optimizer, gamma)
+            if done:
+                break
+        if ep % sync_freq == 0:
+            target_model.load_state_dict(online_model.state_dict())
+        epsilon = max(epsilon_min, epsilon * decay)
+        record_metrics(metrics, total_reward, t + 1, tuple(env.agent_pos) == goal)
+        plotter.update(metrics)
+        print(f"[DQN] Episode {ep} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.3f}")
+    return None, online_model  # agent=None for DQN
 
 # ======================= Q-Learning ==========================
 def train_q_learning(env, metrics):
@@ -145,6 +128,19 @@ def train_q_learning(env, metrics):
             print(f"[QL] Episode {ep}/{NUM_EPISODES} | Reward: {total_reward:.2f}, Steps: {steps}")
             
     return agent, None  # no model used
+
+
+
+
+def unwrap_state(state):
+    """Unwrap a state from a tuple of states (e.g., from a MultiAgentWrapper)."""
+    while isinstance(state, tuple):
+        state = state[0]
+    return state
+
+
+
+
 
 # ====================== Visualization ========================
 def visualize(env, agent, online_model, metrics):
