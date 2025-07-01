@@ -20,7 +20,7 @@ class QLearningAgent:
             done = False
             while not done:
                 action = self.act(state)
-                next_state, reward, done, info = self.env.step(action)
+                next_state, reward, done, _ = self.env.step(action)
 
                 self._update_q_value(state, action, reward, next_state, done)
 
@@ -30,6 +30,7 @@ class QLearningAgent:
 
 
     def act(self, state):
+        row, col = state
         if np.random.rand() < self.epsilon:
             return self.env.action_space.sample()
         else:
@@ -39,19 +40,15 @@ class QLearningAgent:
     def _update_q_value(self, state, action, reward, next_state, done):
         
         current_q = self.Q[state[0], state[1], action]
-        max_q_next = np.max(self.Q[next_state[0], next_state[1]])
-        target_q = reward + (0 if done else self.gamma * max_q_next)
+        target_q = reward
 
 
-        if done:
-            target_q = reward
-        
-        else:
+        if not done:
             max_q_next = np.max(self.Q[next_state[0], next_state[1]])
-            target_q = reward + self.gamma * max_q_next
-
+            target_q += self.gamma * max_q_next
+        
         self.Q[state[0], state[1], action] = (
-        (1 - self.alpha) * current_q + self.alpha * target_q
+            (1 - self.alpha) * current_q + self.alpha * target_q
         )
 
 
