@@ -1,7 +1,7 @@
 import numpy as np
 from numpy import ndindex
 from envs.gridworld import GridWorldEnv
-from config import AGENT_CONFIG
+from config import QL_AGENT_CONFIG
 from tqdm import trange
 
 
@@ -75,10 +75,10 @@ class PolicyIterationAgent:
 if __name__ == "__main__":
     # Instantiate the environment
     from envs.gridworld import GridWorldEnv
-    from config import AGENT_CONFIG
+    from config import QL_AGENT_CONFIG
 
     env = GridWorldEnv()
-    agent = PolicyIterationAgent(env, AGENT_CONFIG)
+    agent = PolicyIterationAgent(env, QL_AGENT_CONFIG)
 
     agent.run_policy_iteration()
 

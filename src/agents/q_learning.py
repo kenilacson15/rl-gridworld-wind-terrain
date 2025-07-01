@@ -1,6 +1,6 @@
 import numpy as np
 from envs.gridworld import GridWorldEnv
-from config import AGENT_CONFIG
+from config import QL_AGENT_CONFIG as AGENT_CONFIG
 
 class QLearningAgent:
     def __init__(self, env, config):

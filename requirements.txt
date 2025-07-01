@@ -3,6 +3,8 @@ numpy
 scipy
 matplotlib
 
+torch  # PyTorch for deep RL agents
+
 # RL and environment tools
 gymnasium
 
@@ -17,3 +19,6 @@ seaborn
 
 # Optional: pandas for data analysis
 pandas
+
+# Testing framework
+pytest
