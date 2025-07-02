@@ -22,7 +22,7 @@ class ValueIterationAgent:
             if delta < self.config["theta"]:
                 break
 
-
+                 
 
     def extract_policy(self):
         self.policy = np.zeros_like(self.V, dtype=int)
