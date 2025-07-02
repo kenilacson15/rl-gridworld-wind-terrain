@@ -6,8 +6,14 @@ import matplotlib.pyplot as plt
 from collections import deque
 from envs.gridworld import GridWorldEnv
 from agents.q_learning import QLearningAgent
+from agents.sarsa import SarsaAgent
 from agents.dqn import DQN, act as dqn_act
-from config import DEFAULT_ENV_CONFIG, QL_AGENT_CONFIG, DQN_AGENT_CONFIG
+from config import (
+    DEFAULT_ENV_CONFIG, 
+    QL_AGENT_CONFIG, 
+    DQN_AGENT_CONFIG,
+    SARSA_AGENT_CONFIG
+)
 from utils.plotting import (
     plot_gridworld,
     plot_final_metrics,
@@ -129,8 +135,26 @@ def train_q_learning(env, metrics):
             
     return agent, None  # no model used
 
-
-
+# ========================= SARSA Logic =========================
+def train_sarsa(env, metrics):
+    """Train SARSA agent."""
+    agent = SarsaAgent(env, SARSA_AGENT_CONFIG)
+    num_episodes = SARSA_AGENT_CONFIG.get("num_episodes", NUM_EPISODES)
+    plotter = LivePlotter()
+    
+    episode_rewards = agent.train(num_episodes)
+    
+    # Record metrics for plotting
+    for reward in episode_rewards:
+        metrics["rewards"].append(reward)
+        
+    plotter.update(
+        episode=len(metrics["rewards"]),
+        reward=np.mean(metrics["rewards"][-100:]),
+        epsilon=agent.epsilon
+    )
+    
+    return agent
 
 def unwrap_state(state):
     """Unwrap a state from a tuple of states (e.g., from a MultiAgentWrapper)."""
@@ -153,9 +177,9 @@ def main():
     """Main execution function with error handling."""
     try:
         # Get agent type from user
-        agent_type = input("Select agent (q_learning/dqn): ").strip().lower()
-        if agent_type not in ["q_learning", "dqn"]:
-            print("[ERROR] Invalid agent type. Must be 'q_learning' or 'dqn'.")
+        agent_type = input("Select agent (q_learning/dqn/sarsa): ").strip().lower()
+        if agent_type not in ["q_learning", "dqn", "sarsa"]:
+            print("[ERROR] Invalid agent type. Must be 'q_learning', 'dqn' or 'sarsa'.")
             return
 
         # Initialize environment and metrics
@@ -167,7 +191,8 @@ def main():
         try:
             agent, model = (
                 train_dqn(env, metrics) if agent_type == "dqn"
-                else train_q_learning(env, metrics)
+                else train_q_learning(env, metrics) if agent_type == "q_learning"
+                else train_sarsa(env, metrics)
             )
         except Exception as train_err:
             print(f"[FATAL] Training failed: {train_err}", file=sys.stderr)

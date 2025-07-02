@@ -76,6 +76,17 @@ DQN_AGENT_CONFIG: Dict[str, Any] = {
     # Add more DQN-specific options as needed
 }
 
+# ====== Agent (SARSA) Configuration ======
+SARSA_AGENT_CONFIG: Dict[str, Any] = {
+    "algorithm": "sarsa",
+    "alpha": 0.1,            # Learning rate
+    "gamma": 0.99,           # Discount factor
+    "epsilon": 1.0,          # Initial exploration rate
+    "min_epsilon": 0.01,     # Minimum exploration rate
+    "decay_rate": 0.995,     # Epsilon decay rate
+    "num_episodes": 1000     # Number of training episodes
+}
+
 # ====== Path Configuration ======
 PATHS: Dict[str, str] = {
     "data": "data/processed/gridworld_v1.pkl",

@@ -1,36 +1,64 @@
 import numpy as np
 import random
+from envs.gridworld import GridWorldEnv
+from config import SARSA_AGENT_CONFIG as AGENT_CONFIG
 
 class SarsaAgent:
-    def __init__(self, state_space_size, action_space_size, alpha=0.1, gamma=0.99, epsilon=0.1):
-        self.states_space_size = state_space_size
-        self.action_space_size = action_space_size
-        self.alpha = alpha
-        self.gamma = gamma
-        self.epsilon = epsilon
-    
+    def __init__(self, env, config):
+        self.env = env
+        self.config = config
+        self.n_actions = env.action_space.n
+        self.Q = np.zeros((env.grid_height, env.grid_width, env.action_space.n))
+        self.alpha = config["alpha"]
+        self.gamma = config["gamma"]
+        self.epsilon = config["epsilon"]
 
-        self.q_table = np.zeros((state_space_size, action_space_size))
+    def train(self, num_episodes):
+        episode_rewards = []
+        for episode in range(num_episodes):
+            state = self.env.reset()
+            action = self.act(state)
+            total_reward = 0
+            done = False
+            
+            while not done:
+                next_state, reward, done, _ = self.env.step(action)
+                next_action = self.act(next_state) if not done else None
+                
+                self._update_q_value(state, action, reward, next_state, next_action)
+                total_reward += reward
+                
+                state = next_state
+                action = next_action
+                
+                if done:
+                    episode_rewards.append(total_reward)
+                    
+            self._decay_epsilon()
+        return episode_rewards
 
-
-    def get_action(self, state):
-        if random.uniform(0, 1) < self.epsilon:
-            return random.randint(0, self.action_space_size - 1)
+    def act(self, state):
+        if np.random.rand() < self.epsilon:
+            return self.env.action_space.sample()
         else:
-            return np.argmax(self.q_table[state])
+            return np.argmax(self.Q[state[0], state[1]])
 
+    def _update_q_value(self, state, action, reward, next_state, next_action):
+        current_q = self.Q[state[0], state[1], action]
+        
+        if next_action is not None:
+            next_q = self.Q[next_state[0], next_state[1], next_action]
+            target_q = reward + self.gamma * next_q
+        else:
+            target_q = reward
+            
+        self.Q[state[0], state[1], action] = (
+            (1 - self.alpha) * current_q + self.alpha * target_q
+        )
 
-
-    def update(self, state, action, reward, next_state, next_action):
-        current_q = self.q_table[state, action]
-        next_q = self.q_table(next_state, next_action)
-        td_target = reward + self.gamma * next_q
-        td_error = td_target - current_q
-        self.q_table[state, action] += self.alpha * td_error
-
-
-    def decay_epsilon(self, decay_rate=0.99, min_epsilon=0.01):
-        self.epsilon = max(min_epsilon, self.epsilon * decay_rate)
+    def _decay_epsilon(self):
+        if self.epsilon > self.config["min_epsilon"]:
+            self.epsilon *= self.config["decay_rate"]
 
 
 
