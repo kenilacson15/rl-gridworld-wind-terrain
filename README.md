@@ -12,7 +12,9 @@ This project provides a fully featured GridWorld environment designed to help re
 * **Wind Effects:** Forces the agent to adjust its path.
 * **Configurable Grid:** Flexible layout and terrain probabilities.
 * **Agents:** Q-Learning, Value Iteration, and Policy Iteration (with examples).
-* **Visualization Tools:** Heatmaps, trajectory plotting, and metric dashboards.
+* **Visualization Tools:** 
+  * PyGame interactive visualization with real-time agent behavior
+  * Heatmaps, trajectory plotting, and metric dashboards
 * **Modular Architecture:** Enables clean separation of environments, agents, and utilities.
 
 ## 🛠️ Getting Started
@@ -22,11 +24,64 @@ This project provides a fully featured GridWorld environment designed to help re
    ```bash
    pip install -r requirements.txt
    ```
-2. Run the main script:
+2. Run the main script with PyGame visualization (default):
 
    ```bash
    python src/main.py
    ```
+
+3. Command-line options:
+
+   ```bash
+   # Run with a specific agent
+   python src/main.py --agent q_learning
+
+   # Run with SARSA agent for 100 episodes
+   python src/main.py --agent sarsa --episodes 100
+
+   # Disable PyGame visualization
+   python src/main.py --no-pygame
+   ```
+
+## 🎮 Enhanced Interactive Visualization
+
+The project includes an enhanced PyGame-based visualization with textures, animations, and a modern UI:
+
+- **Textured Terrain**: Different terrains (ice, mud, quicksand) rendered with detailed textures
+- **Animated Agent**: Smooth agent movement with directional sprites
+- **Particle Effects**: Dynamic wind particles and goal sparkles
+- **Enhanced Visuals**: Gradient backgrounds, glowing elements, and pulsing effects
+- **Modern UI Panel**: Stylish information panel with episode stats and controls
+- **Advanced Heatmap**: Multi-color gradient visualization for state values
+- **Animated Policy Arrows**: Dynamic policy indicators showing agent decisions
+- **Optimized Performance**: Efficient rendering using dirty rectangles and frame rate control
+
+### Running the Enhanced Visualization:
+
+```bash
+# Run the visualization test script
+python src/run_visual_test.py
+
+# Specify agent type (q_learning, dqn, sarsa, random)
+python src/run_visual_test.py --agent q_learning
+
+# Train the agent before visualization
+python src/run_visual_test.py --agent dqn --train --train-steps 2000
+
+# Force regeneration of textures and fonts
+python src/run_visual_test.py --generate-assets
+
+# Set window size
+python src/run_visual_test.py --window-size 1280x800
+```
+
+### Controls:
+
+- **Space:** Pause/resume simulation
+- **V:** Toggle value function visualization
+- **P:** Toggle policy arrows
+- **+/-:** Adjust animation speed
+- **Q/ESC:** Quit visualization
 
 ## 📁 Project Structure
 

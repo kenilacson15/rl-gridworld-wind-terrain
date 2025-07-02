@@ -8,6 +8,12 @@ torch  # PyTorch for deep RL agents
 # RL and environment tools
 gymnasium
 
+# Visualization
+pygame>=2.1.0
+
+# Asset management
+requests  # For font downloads
+
 # Jupyter for experimentation
 jupyter
 
