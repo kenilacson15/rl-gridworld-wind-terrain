@@ -2,175 +2,368 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.gridspec import GridSpec
+import torch
+from typing import Dict, Any, List, Tuple, Optional, Union
 from agents.dqn import act as dqn_act
 
-# Cache for terrain to ensure consistency across frames
-_terrain_cache = {}
+# Use CPU/GPU appropriately
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def plot_gridworld(env, agent=None, fig=None, ax=None, terrain_seed=42, show_q_heatmap=True, trajectory=None, episode=None, step=None, cbar_ax=None):
-    if not hasattr(env, 'config'):
-        raise ValueError("Environment must have config attribute")
-    required_keys = {'grid_size', 'goal_pos', 'wind', 'stochastic_terrain'}
-    if not required_keys.issubset(env.config.keys()):
-        raise ValueError(f"Environment config missing required keys: {required_keys - env.config.keys()}")
-    global _terrain_cache
-    grid_height, grid_width = env.config["grid_size"]
-    cache_key = (terrain_seed, grid_height, grid_width, str(env.config.get("stochastic_terrain", {})))
-    # Precompute terrain map for consistency
-    if cache_key not in _terrain_cache:
-        rng = np.random.RandomState(terrain_seed)
-        ice_map = rng.rand(grid_height, grid_width) < env.config["stochastic_terrain"].get("ice", 0)
-        swamp_map = rng.rand(grid_height, grid_width) < env.config["stochastic_terrain"].get("swamp", 0)
-        _terrain_cache[cache_key] = (ice_map, swamp_map)
-    else:
-        ice_map, swamp_map = _terrain_cache[cache_key]
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-        close_fig = True
-    else:
-        ax.clear()
-        close_fig = False
-    ax.set_xlim(-0.5, grid_width - 0.5)
-    ax.set_ylim(-0.5, grid_height - 0.5)
-    ax.set_xticks(range(grid_width))
-    ax.set_yticks(range(grid_height))
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    ax.grid(True)
-    # Draw goal first (background)
-    goal_row, goal_col = env.config["goal_pos"]
-    ax.add_patch(patches.Rectangle((goal_col-0.3, goal_row-0.3), 0.6, 0.6, color='green', label='Goal', zorder=1))
-    # Draw terrain (ice and swamp) using cached maps
-    for i in range(grid_height):
-        for j in range(grid_width):
-            if ice_map[i, j]:
-                ax.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, color='#b3e0ff', alpha=0.5, zorder=2))
-            if swamp_map[i, j]:
-                ax.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, color='#145a32', alpha=0.3, zorder=2))
-    # Draw wind strength indicators
-    for col, strength in enumerate(env.config["wind"]):
-        if strength > 0:
-            ax.annotate(f'↑{strength}', (col, -0.7), ha='center', fontsize=12, color='navy', zorder=10)
-    # Draw Q-value heatmap if agent is provided
-    if agent is not None and hasattr(agent, 'Q') and show_q_heatmap:
-        q_max = np.max(agent.Q, axis=2)
-        im = ax.imshow(q_max, cmap='YlOrRd', alpha=0.3, origin='upper', extent=[-0.5, grid_width-0.5, grid_height-0.5, -0.5], zorder=3)
-        if cbar_ax is not None:
-            cbar_ax.clear()
-            plt.colorbar(im, cax=cbar_ax)
-            cbar_ax.set_ylabel('Max Q-value')
-    # Draw agent trajectory if provided
-    if trajectory is not None and len(trajectory) > 1:
-        traj = np.array(trajectory)
-        ax.plot(traj[:,1], traj[:,0], color='magenta', linewidth=2, alpha=0.7, label='Trajectory', zorder=11)
-    # Draw policy arrows if agent is not None and has Q
-    if agent is not None and hasattr(agent, 'Q'):
-        for i in range(grid_height):
-            for j in range(grid_width):
-                if (i, j) != tuple(env.config["goal_pos"]):
+class GridWorldVisualizer:
+    """Visualizer class for GridWorld environment and agents."""
+    
+    TERRAIN_COLORS = {
+        'ice': {'color': '#b3e0ff', 'alpha': 0.5},
+        'mud': {'color': '#8b4513', 'alpha': 0.3},
+        'quicksand': {'color': '#c2b280', 'alpha': 0.4}
+    }
+    
+    WIND_ARROWS = {
+        (0, 1): '→',   # Right
+        (0, -1): '←',  # Left
+        (-1, 0): '↑',  # Up
+        (1, 0): '↓',   # Down
+        (-1, 1): '↗',  # Up-Right
+        (-1, -1): '↖', # Up-Left
+        (1, 1): '↘',   # Down-Right
+        (1, -1): '↙'   # Down-Left
+    }
+
+    def __init__(self):
+        self.terrain_cache = {}
+    
+    def plot_gridworld(self, env, agent=None, fig=None, ax=None, show_value_heatmap=True,
+                      trajectory=None, episode=None, step=None, cbar_ax=None):
+        """Plot GridWorld environment with agent, terrain, and policy visualization.
+        
+        Args:
+            env: GridWorld environment instance
+            agent: RL agent instance (Q-Learning, SARSA, DQN, etc.)
+            fig: Optional matplotlib figure
+            ax: Optional matplotlib axis
+            show_value_heatmap: Whether to show value/Q-value heatmap
+            trajectory: List of positions showing agent's path
+            episode: Current episode number
+            step: Current step number
+            cbar_ax: Optional colorbar axis
+        """
+        if not hasattr(env, 'config'):
+            raise ValueError("Environment must have config attribute")
+        
+        grid_height, grid_width = env.config["grid_size"]
+        
+        # Create or clear axes
+        if fig is None or ax is None:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            close_fig = True
+        else:
+            ax.clear()
+            close_fig = False
+            
+        # Set up grid
+        ax.set_xlim(-0.5, grid_width - 0.5)
+        ax.set_ylim(-0.5, grid_height - 0.5)
+        ax.set_xticks(range(grid_width))
+        ax.set_yticks(range(grid_height))
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.grid(True)
+        
+        # Draw terrain
+        self._draw_terrain(ax, env)
+        
+        # Draw wind zones
+        self._draw_wind_zones(ax, env)
+        
+        # Draw value/Q-value heatmap
+        if agent is not None and show_value_heatmap:
+            self._draw_value_heatmap(ax, env, agent, cbar_ax)
+        
+        # Draw policy arrows
+        if agent is not None:
+            self._draw_policy_arrows(ax, env, agent)
+        
+        # Draw trajectory
+        if trajectory:
+            self._draw_trajectory(ax, trajectory)
+        
+        # Draw goal and agent
+        self._draw_goal_and_agent(ax, env)
+        
+        # Add title and info
+        self._add_plot_info(ax, episode, step, env)
+        
+        plt.tight_layout()
+        if close_fig:
+            plt.pause(0.1)
+            plt.close(fig)
+        else:
+            fig.canvas.draw_idle()
+            plt.pause(0.01)
+
+    def _draw_terrain(self, ax, env):
+        """Draw different terrain types."""
+        for terrain_type, data in env.config.get("terrain", {}).items():
+            if terrain_type in self.TERRAIN_COLORS:
+                color_info = self.TERRAIN_COLORS[terrain_type]
+                for pos in data["positions"]:
+                    ax.add_patch(patches.Rectangle(
+                        (pos[1]-0.5, pos[0]-0.5), 1, 1,
+                        color=color_info['color'],
+                        alpha=color_info['alpha'],
+                        label=terrain_type.capitalize(),
+                        zorder=2
+                    ))
+
+    def _draw_wind_zones(self, ax, env):
+        """Draw wind zones with directional indicators."""
+        for wind_zone in env.config.get("wind_zones", []):
+            direction = wind_zone["direction"]
+            strength = wind_zone["strength"]
+            arrow = self.WIND_ARROWS.get(direction, '•')
+            
+            for pos in wind_zone["area"]:
+                ax.add_patch(patches.Rectangle(
+                    (pos[1]-0.5, pos[0]-0.5), 1, 1,
+                    color='lightblue', alpha=0.2, zorder=1
+                ))
+                ax.text(pos[1], pos[0], f'{arrow}{strength:.1f}',
+                       ha='center', va='center', color='navy',
+                       fontsize=10, zorder=3)
+
+    def _draw_value_heatmap(self, ax, env, agent, cbar_ax):
+        """Draw value function or Q-value heatmap."""
+        values = None
+        
+        if hasattr(agent, 'Q'):  # Q-Learning or SARSA
+            values = np.max(agent.Q, axis=2)
+        elif hasattr(agent, 'V'):  # Value/Policy Iteration
+            values = agent.V
+        elif hasattr(agent, 'online_net'):  # DQN
+            # For DQN, we'll need to get Q-values for all states
+            values = np.zeros(env.config["grid_size"])
+            for i in range(env.grid_height):
+                for j in range(env.grid_width):
+                    state = np.array([i, j])
+                    q_values = agent.online_net(torch.FloatTensor(state).to(DEVICE))
+                    values[i, j] = q_values.max().item()
+        
+        if values is not None:
+            im = ax.imshow(values, cmap='YlOrRd', alpha=0.3,
+                         origin='upper', extent=[-0.5, env.grid_width-0.5,
+                                               env.grid_height-0.5, -0.5],
+                         zorder=2)
+            if cbar_ax is not None:
+                cbar_ax.clear()
+                plt.colorbar(im, cax=cbar_ax)
+                cbar_ax.set_ylabel('Value')
+
+    def _draw_policy_arrows(self, ax, env, agent):
+        """Draw policy arrows showing the best action in each state."""
+        action_to_arrow = {
+            0: (0, 0.3),    # Up
+            1: (0.3, 0),    # Right
+            2: (0, -0.3),   # Down
+            3: (-0.3, 0)    # Left
+        }
+        
+        for i in range(env.grid_height):
+            for j in range(env.grid_width):
+                if (i, j) == tuple(env.config["goal_pos"]):
+                    continue
+                    
+                action = None
+                if hasattr(agent, 'Q'):  # Q-Learning or SARSA
                     action = np.argmax(agent.Q[i, j])
-                    dx, dy = 0, 0
-                    if action == 0: dy = 0.3  # up
-                    elif action == 1: dy = -0.3  # down
-                    elif action == 2: dx = -0.3  # left
-                    elif action == 3: dx = 0.3  # right
-                    ax.arrow(j, i, dx, dy, head_width=0.18, head_length=0.18, fc='blue', ec='blue', alpha=0.6, zorder=8, length_includes_head=True)
-    # Draw agent (on top)
-    agent_row, agent_col = env.agent_pos
-    ax.add_patch(patches.Circle((agent_col, agent_row), 0.3, color='orange', ec='black', lw=1.5, label='Agent', zorder=12))
-    # Remove duplicate legends
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), loc='center left', bbox_to_anchor=(1.02, 0.5), borderaxespad=0.)
-    # Add episode/step info
-    if episode is not None and step is not None:
-        ax.set_title(f"GridWorld | Episode {episode+1} | Step {step+1}")
-    else:
-        ax.set_title("GridWorld Environment")
-    plt.tight_layout()
-    if close_fig:
-        plt.pause(0.1)
-        plt.close(fig)
-    else:
-        fig.canvas.draw_idle()
-        plt.pause(0.01)
+                elif hasattr(agent, 'policy'):  # Value/Policy Iteration
+                    action = agent.policy[i, j]
+                elif hasattr(agent, 'online_net'):  # DQN
+                    state = torch.FloatTensor([i, j]).to(DEVICE)
+                    action = agent.online_net(state).argmax().item()
+                
+                if action is not None:
+                    dx, dy = action_to_arrow[action]
+                    ax.arrow(j, i, dx, dy, head_width=0.15, head_length=0.15,
+                            fc='blue', ec='blue', alpha=0.6, zorder=4,
+                            length_includes_head=True)
 
-def update_metric_plots(metrics, r_ax, s_ax, succ_ax):
-    """Update the metrics plot axes with current training metrics."""
-    r_ax.clear()
-    s_ax.clear()
-    succ_ax.clear()
+    def _draw_trajectory(self, ax, trajectory):
+        """Draw agent's trajectory through the environment."""
+        if len(trajectory) > 1:
+            traj = np.array(trajectory)
+            ax.plot(traj[:, 1], traj[:, 0], 'magenta',
+                   linewidth=2, alpha=0.7, label='Trajectory',
+                   zorder=5)
+
+    def _draw_goal_and_agent(self, ax, env):
+        """Draw goal and current agent position."""
+        # Draw goal
+        goal_row, goal_col = env.config["goal_pos"]
+        ax.add_patch(patches.Rectangle(
+            (goal_col-0.3, goal_row-0.3), 0.6, 0.6,
+            color='green', label='Goal', zorder=6
+        ))
+        
+        # Draw agent
+        agent_row, agent_col = env.agent_pos
+        ax.add_patch(patches.Circle(
+            (agent_col, agent_row), 0.3,
+            color='orange', ec='black', lw=1.5,
+            label='Agent', zorder=7
+        ))
+
+    def _add_plot_info(self, ax, episode, step, env):
+        """Add title, legend, and other information to the plot."""
+        title = "GridWorld Environment"
+        if episode is not None:
+            title += f" | Episode {episode+1}"
+        if step is not None:
+            title += f" | Step {step+1}"
+        
+        ax.set_title(title)
+        
+        # Add legend with no duplicates
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(
+            by_label.values(),
+            by_label.keys(),
+            loc='center left',
+            bbox_to_anchor=(1.02, 0.5),
+            borderaxespad=0.
+        )
+
+class MetricsVisualizer:
+    """Class for visualizing training metrics."""
+    
+    def __init__(self, agent_type: str):
+        """
+        Args:
+            agent_type: Type of agent ('q_learning', 'sarsa', 'dqn', etc.)
+        """
+        self.agent_type = agent_type.upper()
+        plt.ion()
+        self.fig, (self.r_ax, self.s_ax, self.succ_ax) = plt.subplots(1, 3, figsize=(15, 4))
+        self.setup_axes()
+        
+    def setup_axes(self):
+        """Set up the axes with proper labels and titles."""
+        self.fig.suptitle(f"{self.agent_type} Training Metrics")
+        
+        self.r_ax.set_title("Rewards per Episode")
+        self.r_ax.set_xlabel("Episode")
+        self.r_ax.set_ylabel("Total Reward")
+        
+        self.s_ax.set_title("Steps per Episode")
+        self.s_ax.set_xlabel("Episode")
+        self.s_ax.set_ylabel("Steps")
+        
+        self.succ_ax.set_title("Success Rate")
+        self.succ_ax.set_xlabel("Episode")
+        self.succ_ax.set_ylabel("Success Rate (10-ep avg)")
+        
+        self.fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    def update(self, metrics: Dict[str, List]):
+        """Update plots with new metrics."""
+        self.r_ax.clear()
+        self.s_ax.clear()
+        self.succ_ax.clear()
+        
+        # Plot rewards
+        self.r_ax.plot(metrics["rewards"], 'b-')
+        self.r_ax.grid(True)
+        
+        # Plot steps
+        self.s_ax.plot(metrics["steps"], 'g-')
+        self.s_ax.grid(True)
+        
+        # Plot success rate
+        if metrics["successes"]:
+            window = min(10, len(metrics["successes"]))
+            rate = np.convolve(metrics["successes"], 
+                             np.ones(window)/window, mode='valid')
+            self.succ_ax.plot(rate, 'r-')
+            self.succ_ax.set_ylim(-0.1, 1.1)
+        self.succ_ax.grid(True)
+        
+        self.setup_axes()
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+    def save(self, filepath: str):
+        """Save the current figure to a file."""
+        self.fig.savefig(filepath, bbox_inches='tight', dpi=300)
+
+def plot_comparison(metrics_list: List[Dict], agent_names: List[str],
+                   save_path: Optional[str] = None):
+    """Plot comparison of different agents' performance.
+    
+    Args:
+        metrics_list: List of metrics dictionaries from different agents
+        agent_names: List of agent names for the legend
+        save_path: Optional path to save the comparison plot
+    """
+    fig, (r_ax, s_ax, sr_ax) = plt.subplots(1, 3, figsize=(15, 5))
+    fig.suptitle("Agent Performance Comparison")
+    
+    colors = plt.cm.Set3(np.linspace(0, 1, len(agent_names)))
     
     # Plot rewards
-    r_ax.plot(metrics["rewards"], 'b-')
     r_ax.set_title("Rewards per Episode")
     r_ax.set_xlabel("Episode")
     r_ax.set_ylabel("Total Reward")
-    r_ax.grid(True)
     
     # Plot steps
-    s_ax.plot(metrics["steps"], 'r-')
     s_ax.set_title("Steps per Episode")
     s_ax.set_xlabel("Episode")
     s_ax.set_ylabel("Steps")
-    s_ax.grid(True)
     
-    # Plot success rate
-    if metrics["successes"]:
-        window = min(10, len(metrics["successes"]))
-        rate = np.convolve(metrics["successes"], np.ones(window)/window, mode='valid')
-        succ_ax.plot(rate, 'g-')
-        succ_ax.set_ylim(-0.1, 1.1)
-        succ_ax.set_title("Success Rate")
-        succ_ax.set_xlabel("Episode")
-        succ_ax.set_ylabel("Success Rate (10-ep avg)")
-        succ_ax.grid(True)
-
-def plot_final_metrics(metrics):
-    """Create a final summary plot of all metrics."""
-    plt.figure(figsize=(15, 5))
+    # Plot success rates
+    sr_ax.set_title("Success Rate")
+    sr_ax.set_xlabel("Episode")
+    sr_ax.set_ylabel("Success Rate (10-ep avg)")
     
-    # Plot rewards
-    plt.subplot(131)
-    plt.plot(metrics["rewards"], 'b-')
-    plt.title("Episode Rewards")
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.grid(True)
+    for metrics, name, color in zip(metrics_list, agent_names, colors):
+        # Smooth the metrics for clearer visualization
+        window = min(10, len(metrics["rewards"]))
+        reward_smooth = np.convolve(metrics["rewards"],
+                                  np.ones(window)/window, mode='valid')
+        steps_smooth = np.convolve(metrics["steps"],
+                                 np.ones(window)/window, mode='valid')
+        
+        r_ax.plot(reward_smooth, color=color, label=name)
+        s_ax.plot(steps_smooth, color=color, label=name)
+        
+        if metrics["successes"]:
+            success_rate = np.convolve(metrics["successes"],
+                                     np.ones(window)/window, mode='valid')
+            sr_ax.plot(success_rate, color=color, label=name)
     
-    # Plot steps
-    plt.subplot(132)
-    plt.plot(metrics["steps"], 'g-')
-    plt.title("Steps per Episode")
-    plt.xlabel("Episode")
-    plt.ylabel("Steps")
-    plt.grid(True)
+    for ax in [r_ax, s_ax, sr_ax]:
+        ax.grid(True)
+        ax.legend()
     
-    # Plot success rate
-    plt.subplot(133)
-    window = min(10, len(metrics["successes"]))
-    rate = np.convolve(metrics["successes"], np.ones(window)/window, mode='valid')
-    plt.plot(rate, 'r-')
-    plt.title("Success Rate")
-    plt.xlabel("Episode")
-    plt.ylabel("Success Rate (10-ep avg)")
-    plt.ylim(-0.1, 1.1)
-    plt.grid(True)
-    
+    sr_ax.set_ylim(-0.1, 1.1)
     plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
+    plt.show()
 
-def animate_gridworld_episode(env, agent, online_model, metrics, num_episodes):
+def animate_gridworld_episode(env, agent, online_model, metrics, num_episodes, agent_type="unknown"):
     """Animate the gridworld environment and update metrics in real-time."""
     plt.ion()  # Enable interactive mode
+    
+    # Create visualizers
+    grid_vis = GridWorldVisualizer()
+    metrics_vis = MetricsVisualizer(agent_type)
     
     # Create main environment figure with colorbar
     env_fig = plt.figure(figsize=(9, 8))
     gs = GridSpec(1, 2, width_ratios=[20, 1], figure=env_fig)
     env_ax = env_fig.add_subplot(gs[0])
     cbar_ax = env_fig.add_subplot(gs[1])
-    
-    # Create metrics figure
-    metrics_fig, (r_ax, s_ax, succ_ax) = plt.subplots(1, 3, figsize=(15, 4))
     
     try:
         for ep in range(num_episodes):
@@ -196,14 +389,14 @@ def animate_gridworld_episode(env, agent, online_model, metrics, num_episodes):
 
                 # Update visualizations
                 env_ax.clear()
-                plot_gridworld(
+                grid_vis.plot_gridworld(
                     env, agent, env_fig, env_ax,
                     trajectory=trajectory,
                     episode=ep,
                     step=step_count,
                     cbar_ax=cbar_ax
                 )
-                update_metric_plots(metrics, r_ax, s_ax, succ_ax)
+                metrics_vis.update(metrics)
                 plt.pause(0.05)  # Control animation speed
                 
             plt.pause(0.5)  # Pause between episodes
