@@ -73,18 +73,25 @@ def act(state, model, epsilon):
         
 
 def unwrap_state(state):
-    while isinstance(staple, tuple):
+    while isinstance(state, tuple):
         state = state[0]
     return state
 
 
 def sample_minibatch(replay_buffer):
     minibatch = random.sample(replay_buffer, batch_size)
-    states = torch.FloatTensor([transition[0] for transition in minibatch]).to(device)
-    actions = torch.LongTensor([transition[1] for transition in minibatch]).to(device)
-    rewards = torch.FloatTensor([transition[2] for transition in minibatch]).to(device)
-    next_states = torch.FloatTensor([transition[3] for transition in minibatch]).to(device)
-    dones = torch.FloatTensor([transition[4] for transition in minibatch]).to(device)
+    states = np.array([transition[0] for transition in minibatch])
+    actions = np.array([transition[1] for transition in minibatch])
+    rewards = np.array([transition[2] for transition in minibatch])
+    next_states = np.array([transition[3] for transition in minibatch])
+    dones = np.array([transition[4] for transition in minibatch])
+
+    states = torch.FloatTensor(states).to(device)
+    actions = torch.LongTensor(actions).to(device)
+    rewards = torch.FloatTensor(rewards).to(device)
+    next_states = torch.FloatTensor(next_states).to(device)
+    dones = torch.FloatTensor(dones).to(device)
+
     return states, actions, rewards, next_states, dones
 
 # Initialize
@@ -101,17 +108,28 @@ def build_models(input_dim, output_dim):
     target = DuelingDQN(input_dim, output_dim).to(device)
     target.load_state_dict(online.state_dict())
     target.eval()
+    
     return online, target
 
 
+    
 
 
 
-online_model = DuelingDQN(input_dim=state_size, output_dim=action_size).to(device)
-target_model = DuelingDQN(input_dim=state_size, output_dim=action_size).to(device)
-target_model.load_state_dict(online_model.state_dict())
-target_model.eval()
+
+
+
+online_model, target_model = build_models(input_dim=state_size, output_dim=action_size)
+online_model.train()
+
 optimizer = optim.Adam(online_model.parameters(), lr=learning_rate)
+
+
+
+
+
+
+
 replay_buffer = deque(maxlen=buffer_size)
 
 num_episodes = 500
@@ -124,8 +142,7 @@ for episode in range(num_episodes):
     total_reward = 0
     for t in range(max_steps):
         action = act(state, online_model, epsilon)
-        result = env.step(action)
-        next_state, reward, done, = result[:3]
+        next_state, reward, done, _ = env.step(action)
         if isinstance(next_state, tuple):
             next_state = next_state[0]
         # Reward shaping: add step penalty
@@ -138,17 +155,19 @@ for episode in range(num_episodes):
             # Double DQN target
             with torch.no_grad():
                 next_actions = online_model(next_states).argmax(1)
-                next_q = target_model(next_states).gather(1, next_actions.unsqueeze(1)).squeeze(1)
+                next_q = target_model(next_states).gather(1, next_actions.unsqueeze(1)).view(-1)
                 target = rewards + (1 - dones) * gamma * next_q
             q_values = online_model(states)
-            q_value = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+            q_value = q_values.gather(1, actions.unsqueeze(1)).view(-1)
             loss = nn.SmoothL1Loss()(q_value, target)
+           
+
+
+
             optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
-
-
             torch.nn.utils.clip_grad_norm_(online_model.parameters(), 1.0)
+            optimizer.step()
 
 
 
