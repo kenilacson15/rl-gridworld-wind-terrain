@@ -153,7 +153,22 @@ class TextureGenerator:
         """Generate a normal (grass) tile texture."""
         size = (self.base_size, self.base_size)
         
-        # Create base grass color
+        # Check if we have the grass texture in the animated folder
+        animated_grass_path = os.path.join(self.output_dir, "..", "animated", "Grass Texture 1.jpg")
+        if os.path.exists(animated_grass_path):
+            try:
+                # Load and resize the grass texture
+                grass_img = pygame.image.load(animated_grass_path)
+                grass_img = pygame.transform.scale(grass_img, size)
+                
+                # Save it to the regular textures folder
+                pygame.image.save(grass_img, self.output_dir / "normal.png")
+                print("Used existing grass texture from animated folder")
+                return grass_img
+            except Exception as e:
+                print(f"Warning: Failed to use existing grass texture: {e}")
+        
+        # Fallback to procedural generation if the file doesn't exist or load fails
         surface = pygame.Surface(size)
         base_color = (100, 180, 100)  # Green
         surface.fill(base_color)
@@ -199,7 +214,22 @@ class TextureGenerator:
         """Generate a mud tile texture."""
         size = (self.base_size, self.base_size)
         
-        # Create base mud color
+        # Check if we have the mud texture in the animated folder
+        animated_mud_path = os.path.join(self.output_dir, "..", "animated", "mud.PNG")
+        if os.path.exists(animated_mud_path):
+            try:
+                # Load and resize the mud texture
+                mud_img = pygame.image.load(animated_mud_path)
+                mud_img = pygame.transform.scale(mud_img, size)
+                
+                # Save it to the regular textures folder
+                pygame.image.save(mud_img, self.output_dir / "mud.png")
+                print("Used existing mud texture from animated folder")
+                return mud_img
+            except Exception as e:
+                print(f"Warning: Failed to use existing mud texture: {e}")
+        
+        # Fallback to procedural generation
         surface = pygame.Surface(size)
         base_color = (139, 69, 19)  # Brown
         surface.fill(base_color)
