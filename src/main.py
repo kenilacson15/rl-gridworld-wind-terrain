@@ -576,6 +576,20 @@ def parse_args():
     )
     return parser.parse_args()
 
+# ===================== VISUALIZATION SELECTION =====================
+def select_visualization_backend():
+    print("\nSelect visualization backend:")
+    print("1. Matplotlib (static/animated plots, no live dashboard)")
+    print("2. Pygame (interactive visualization)")
+    while True:
+        choice = input("Enter 1 or 2: ").strip()
+        if choice == "1":
+            return "matplotlib"
+        elif choice == "2":
+            return "pygame"
+        else:
+            print("Invalid input. Please enter 1 or 2.")
+
 # ===================== MAIN FUNCTION =====================
 def main():
     """
@@ -588,6 +602,8 @@ def main():
     4. Clear error handling and resource cleanup
     """
     try:
+        backend = select_visualization_backend()
+        
         # Parse command line arguments
         args = parse_args()
         use_pygame = not args.no_pygame
@@ -654,24 +670,37 @@ def main():
         env = GridWorldEnv(config=DEFAULT_ENV_CONFIG)
         metrics = initialize_metrics()
         
-        # Initialize thread-safe metrics visualizer
-        metrics_vis = LiveMetricsVisualizer(agent_type.upper(), update_interval=METRICS_UPDATE_INTERVAL)
-        
-        # Train the selected agent
         agent, model = None, None
         
-        try:
+        # Only import and use the selected backend
+        if backend == "matplotlib":
+            from utils.plotting import GridWorldVisualizer, MetricsVisualizer
+            # Train agent without PyGame visualizer
             if agent_type == "dqn":
-                agent, model = train_dqn(env, metrics, use_pygame, metrics_vis)
+                agent, model = train_dqn(env, metrics, use_pygame=False, metrics_vis=None)
             elif agent_type == "q_learning":
-                agent, model = train_q_learning(env, metrics, use_pygame, metrics_vis)
+                agent, model = train_q_learning(env, metrics, use_pygame=False, metrics_vis=None)
             elif agent_type == "sarsa":
-                agent, model = train_sarsa(env, metrics, use_pygame, metrics_vis)
-                
-        except Exception as train_err:
-            print(f"\n[FATAL] Training failed: {train_err}")
-            traceback.print_exc()
-            return
+                agent, model = train_sarsa(env, metrics, use_pygame=False, metrics_vis=None)
+            # After training, show static/animated matplotlib plots
+            vis = GridWorldVisualizer()
+            vis.plot_gridworld(env, agent=agent, episode=num_episodes)
+            metrics_vis = MetricsVisualizer(agent_type.upper())
+            metrics_vis.update(metrics)
+            metrics_vis.save("metrics_matplotlib.png")
+            print("Matplotlib plots saved as 'metrics_matplotlib.png'.")
+            input("Press Enter to exit...")
+        elif backend == "pygame":
+            from utils.game_visual import GridWorldVisualizer as PyGameVisualizer
+            # Train agent with PyGame visualizer
+            if agent_type == "dqn":
+                agent, model = train_dqn(env, metrics, use_pygame=True, metrics_vis=None)
+            elif agent_type == "q_learning":
+                agent, model = train_q_learning(env, metrics, use_pygame=True, metrics_vis=None)
+            elif agent_type == "sarsa":
+                agent, model = train_sarsa(env, metrics, use_pygame=True, metrics_vis=None)
+            # After training, optionally run PyGame visualization (if not already shown during training)
+            # (You can add a summary visualization here if desired)
         
         # ===== TRAINING COMPLETE =====
         print(f"\n✅ {agent_type.upper()} training completed!")
