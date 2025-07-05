@@ -47,6 +47,16 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# Streamlit-related files
+streamlit_requirements.txt
+launch_dashboard.py
+src/utils/streamlit_viz.py
+src/utils/STREAMLIT_README.md
+
+# Deprecated test and redundant files
+src/main_optimized.py
+src/test_optimized_visualization.py
+
 # Environments
 .env
 .venv
