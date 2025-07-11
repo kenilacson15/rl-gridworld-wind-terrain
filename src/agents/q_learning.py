@@ -3,11 +3,26 @@ from envs.gridworld import GridWorldEnv
 from config import QL_AGENT_CONFIG as AGENT_CONFIG
 
 class QLearningAgent:
+
+    """
+    Q-Learning agent for reinforcement learning in discrete state-action spaces.
+    
+    Attributes:
+        env: The environment the agent interacts with
+        config: Configuration dictionary containing hyperparameters
+        n_actions: Number of possible actions
+        Q: Q-value table of shape (height, width, actions)
+        alpha: Learning rate
+        gamma: Discount factor
+        epsilon: Exploration rate
+    """
+
     def __init__(self, env, config):
         self.env = env
         self.config = config
         self.n_actions = env.action_space.n
-        self.Q = np.zeros((env.grid_height, env.grid_width, env.action_space.n))
+        self.state_shape = (env.grid_height, env.grid_width)
+        self.Q = np.zeros(self.state_shape + (self.n_actions,))
         self.alpha = config["alpha"]
         self.gamma = config["gamma"]
         self.epsilon = config["epsilon"]
@@ -25,6 +40,9 @@ class QLearningAgent:
                 self._update_q_value(state, action, reward, next_state, done)
 
                 state = next_state
+
+            
+            self.decay_epsilon()
 
 
 
@@ -53,7 +71,23 @@ class QLearningAgent:
 
 
 
-    def _decay_epsilon(self):
+    def decay_epsilon(self):
         if self.epsilon > self.config["min_epsilon"]:
             self.epsilon *= self.config["decay_rate"]
+
+    
+    def update(self, state, action, reward, next_state):
+
+        self._update_q_value(state, action, reward, next_state, done=False)
+
+    
+    def get_policy(self):
+
+        policy = {}
+        for row in range(self.state_shape[0]):
+            for col in range(self.state_shape[1]):
+                state = (row, col)
+                policy[state] = np.argmax(self.Q[row, col])
+        
+        return policy
 

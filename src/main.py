@@ -1,25 +1,21 @@
 import random
+import logging
+import logging.config
+from logging.handlers import RotatingFileHandler
+import sys
 import torch
 import torch.nn as nn
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend to avoid GUI thread issues
-# Optimize matplotlib for real-time performance
-matplotlib.rcParams.update({
-    'figure.max_open_warning': 0,
-    'animation.embed_limit': 20,
-    'axes.grid': True,
-    'grid.alpha': 0.3,
-    'lines.linewidth': 1.5,
-    'font.size': 9,
-    'figure.autolayout': True,
-    'savefig.dpi': 80,
-    'figure.dpi': 80
-})
-import matplotlib.pyplot as plt
 from collections import deque
 import time
 import threading
+import queue
+import argparse
+import traceback
+from typing import Dict, List, Tuple, Optional, Any
+
+# Delay matplotlib import until needed for specific visualization backend
+# This prevents unnecessary initialization when using PyGame
 import queue
 import argparse
 import traceback
@@ -39,6 +35,87 @@ from config import (
     DQN_AGENT_CONFIG,
     SARSA_AGENT_CONFIG
 )
+
+# Import metrics logging utilities
+from utils.metrics_logger import save_metrics_to_csv, generate_enhanced_plot
+
+# ===================== LOGGING CONFIGURATION =====================
+def setup_logging():
+    """
+    Configure centralized logging for the entire application.
+    Sets up both console and file handlers with appropriate formatting.
+    """
+    # Create logs directory if it doesn't exist
+    import os
+    from datetime import datetime
+    from pathlib import Path
+    
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    # Create timestamped log filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"gridworld_training_{timestamp}.log"
+    
+    # Configure logging
+    logging_config = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'detailed': {
+                'format': '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s',
+                'datefmt': '%Y-%m-%d %H:%M:%S'
+            },
+            'simple': {
+                'format': '%(levelname)s | %(message)s'
+            }
+        },
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'level': 'INFO',
+                'formatter': 'simple',
+                'stream': 'ext://sys.stdout'
+            },
+            'file': {
+                'class': 'logging.handlers.RotatingFileHandler',
+                'level': 'DEBUG',
+                'formatter': 'detailed',
+                'filename': str(log_file),
+                'maxBytes': 10485760,  # 10MB
+                'backupCount': 5,
+                'encoding': 'utf-8'
+            }
+        },
+        'loggers': {
+            '': {  # root logger
+                'level': 'DEBUG',
+                'handlers': ['console', 'file'],
+                'propagate': False
+            }
+        }
+    }
+    
+    logging.config.dictConfig(logging_config)
+    
+    # Create module-specific loggers
+    main_logger = logging.getLogger('gridworld_rl.main')
+    env_logger = logging.getLogger('gridworld_rl.environment')
+    agent_logger = logging.getLogger('gridworld_rl.agent')
+    vis_logger = logging.getLogger('gridworld_rl.visualization')
+    
+    # Log system startup information
+    main_logger.info("=" * 60)
+    main_logger.info("GridWorld RL Training Session Started")
+    main_logger.info(f"Python version: {sys.version}")
+    main_logger.info(f"Device: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
+    main_logger.info(f"Log file: {log_file}")
+    main_logger.info("=" * 60)
+    
+    return main_logger, env_logger, agent_logger, vis_logger
+
+# Initialize logging system
+main_logger, env_logger, agent_logger, vis_logger = setup_logging()
 
 # ===================== GLOBAL SETTINGS =====================
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,7 +137,7 @@ class GridWorldEnv:
         # Create a simple action space object
         self.action_space = type('ActionSpace', (), {
             'n': 4,
-            'sample': lambda: random.randint(0, 3)
+            'sample': lambda self=None: random.randint(0, 3)  # Fixed to accept self parameter
         })()
         
         # Action to direction mapping: 0=Up, 1=Right, 2=Down, 3=Left
@@ -73,6 +150,11 @@ class GridWorldEnv:
         
         self.agent_pos = None
         self.steps_taken = 0
+        
+        # Log environment initialization
+        env_logger.info(f"GridWorld environment initialized with grid size {self.grid_height}x{self.grid_width}")
+        env_logger.debug(f"Start position: {self.config.get('start_pos')}, Goal position: {self.config.get('goal_pos')}")
+        
         self.reset()
 
     def reset(self):
@@ -186,17 +268,30 @@ class LiveMetricsVisualizer(threading.Thread):
         # File-based approach to avoid GUI threading issues
         self.save_path = "metrics_plots.png"
         
+        # Import and configure matplotlib on demand
+        import matplotlib
+        import matplotlib.pyplot as plt
+        self.plt = plt  # Store plt as instance variable
+        
         # Initialize Matplotlib for headless rendering
+        matplotlib.use('Agg')  # Non-interactive backend
         plt.ioff()  # Turn off interactive mode
         matplotlib.rcParams.update({
             'figure.max_open_warning': 0,
             'animation.embed_limit': 20,
             'figure.facecolor': 'white',
             'axes.facecolor': 'white',
-            'savefig.facecolor': 'white'
+            'savefig.facecolor': 'white',
+            'axes.grid': True,
+            'grid.alpha': 0.3,
+            'lines.linewidth': 1.5,
+            'font.size': 9,
+            'figure.autolayout': True,
+            'savefig.dpi': 80,
+            'figure.dpi': 80
         })
         
-        print(f"📊 Metrics will be saved to {self.save_path} every {update_interval}s")
+        vis_logger.debug(f"Metrics will be saved to {self.save_path} every {update_interval}s")
         
         # Start the update thread
         self.start()
@@ -221,7 +316,7 @@ class LiveMetricsVisualizer(threading.Thread):
                     self._last_update_time = current_time
                     
             except Exception as e:
-                print(f"Metrics update error: {e}")
+                vis_logger.error(f"Metrics update error: {e}")
             
             time.sleep(self.update_interval)
 
@@ -229,7 +324,7 @@ class LiveMetricsVisualizer(threading.Thread):
         """Create and save plot to file efficiently."""
         try:
             # Create new figure for each update to avoid threading issues
-            fig, (r_ax, s_ax, succ_ax) = plt.subplots(1, 3, figsize=(15, 4), dpi=80)
+            fig, (r_ax, s_ax, succ_ax) = self.plt.subplots(1, 3, figsize=(15, 4), dpi=80)
             fig.suptitle(f"{self.agent_type} Training Metrics (Live)", fontsize=12)
             
             # Plot rewards
@@ -267,10 +362,10 @@ class LiveMetricsVisualizer(threading.Thread):
             # Save to file
             fig.tight_layout()
             fig.savefig(self.save_path, dpi=80, bbox_inches='tight')
-            plt.close(fig)  # Important: close figure to free memory
+            self.plt.close(fig)  # Important: close figure to free memory
             
         except Exception as e:
-            print(f"Error creating plot: {e}")
+            vis_logger.error(f"Error creating plot: {e}")
 
     def setup_axes(self):
         """Placeholder for compatibility - not needed for file-based approach."""
@@ -336,20 +431,86 @@ class LiveMetricsVisualizer(threading.Thread):
         
         # Clean up any remaining matplotlib figures
         try:
-            plt.close('all')
+            self.plt.close('all')
         except:
             pass
 
-# ===================== PYGAME VISUALIZER (IMPORT ONLY) =====================
-# All Pygame visualization logic is in utils/game_visual.py
-# Import the existing GridWorldVisualizer instead of duplicating code
-try:
-    from utils.game_visual import GridWorldVisualizer as PyGameVisualizer
-    PYGAME_AVAILABLE = True
-except ImportError:
-    print("Warning: Could not import GridWorldVisualizer from utils.game_visual")
-    PyGameVisualizer = None
-    PYGAME_AVAILABLE = False
+# ===================== VISUALIZATION UTILS =====================
+def import_pygame_visualizer():
+    """
+    Dynamically import PyGame visualizer only when needed.
+    This prevents unnecessary initialization when using Matplotlib.
+    """
+    try:
+        from utils.game_visual import GridWorldVisualizer
+        return GridWorldVisualizer
+    except ImportError:
+        vis_logger.warning("Could not import GridWorldVisualizer from utils.game_visual")
+        return None
+
+# ===================== VISUALIZATION INITIALIZATION =====================
+def initialize_visualization(backend, agent_type, metrics=None):
+    """
+    Initialize visualization backend based on user selection.
+    Returns appropriate visualizer objects and settings.
+    
+    Args:
+        backend: "matplotlib" or "pygame"
+        agent_type: Type of agent being trained
+        metrics: Optional metrics dictionary to initialize visualizer
+        
+    Returns:
+        vis: Primary visualizer object
+        metrics_vis: Metrics visualizer object
+        use_pygame: Boolean indicating if PyGame should be used
+    """
+    vis_logger.info(f"Initializing {backend} visualization for {agent_type} agent")
+    
+    if backend == "matplotlib":
+        # Import matplotlib-specific modules only when needed
+        from utils.plotting import GridWorldVisualizer, MetricsVisualizer
+        
+        # Configure matplotlib for non-interactive use
+        import matplotlib
+        matplotlib.use('Agg')  # Non-interactive backend
+        matplotlib.rcParams.update({
+            'figure.max_open_warning': 0,
+            'animation.embed_limit': 20,
+            'axes.grid': True,
+            'grid.alpha': 0.3,
+            'lines.linewidth': 1.5,
+            'font.size': 9,
+            'figure.autolayout': True,
+            'savefig.dpi': 80,
+            'figure.dpi': 80
+        })
+        
+        vis_logger.debug("Matplotlib configured for non-interactive use")
+        
+        # Create visualizers
+        vis = GridWorldVisualizer()
+        metrics_vis = MetricsVisualizer(agent_type.upper())
+        if metrics:
+            metrics_vis.update(metrics)
+            
+        return vis, metrics_vis, False  # vis, metrics_vis, use_pygame
+        
+    elif backend == "pygame":
+        # Import pygame-specific modules only when needed
+        PyGameVisualizer = import_pygame_visualizer()
+        
+        if not PyGameVisualizer:
+            vis_logger.error("PyGame visualization is not available")
+            raise ImportError("PyGame visualization is not available")
+        
+        # Create visualizers
+        pygame_vis = PyGameVisualizer()
+        metrics_vis = LiveMetricsVisualizer(agent_type.upper())
+        
+        return pygame_vis, metrics_vis, True  # vis, metrics_vis, use_pygame
+    
+    vis_logger.error(f"Unknown visualization backend: {backend}")
+    raise ValueError(f"Unknown visualization backend: {backend}")
 
 # ===================== TRAINING UTILITIES =====================
 def initialize_metrics():
@@ -369,13 +530,15 @@ def unwrap_state(state):
     return state
 
 # ===================== TRAINING FUNCTIONS =====================
-def train_q_learning(env, metrics, use_pygame=True, metrics_vis=None):
+def train_q_learning(env, metrics, use_pygame=False, metrics_vis=None, pygame_vis=None):
     """Train Q-Learning agent."""
+    agent_logger.info("Initializing Q-Learning agent")
     agent = QLearningAgent(env, QL_AGENT_CONFIG)
     goal = tuple(env.config["goal_pos"])
     num_episodes = QL_AGENT_CONFIG["num_episodes"]
     
-    pygame_vis = PyGameVisualizer() if use_pygame else None
+    agent_logger.debug(f"Q-Learning parameters: alpha={QL_AGENT_CONFIG['alpha']}, "
+                      f"gamma={QL_AGENT_CONFIG['gamma']}, epsilon={QL_AGENT_CONFIG['epsilon']}")
     
     for ep in range(num_episodes):
         obs = env.reset()
@@ -401,17 +564,22 @@ def train_q_learning(env, metrics, use_pygame=True, metrics_vis=None):
         agent.decay_epsilon()
         
         if ep % 10 == 0:
-            print(f"[Q-Learning] Episode {ep}/{num_episodes} | Reward: {total_reward:.2f}, Steps: {steps}")
+            agent_logger.info(f"Q-Learning Episode {ep}/{num_episodes} | "
+                             f"Reward: {total_reward:.2f}, Steps: {steps}, "
+                             f"Epsilon: {agent.epsilon:.3f}")
     
+    agent_logger.info(f"Q-Learning training completed - {num_episodes} episodes")
     return agent, None
 
-def train_sarsa(env, metrics, use_pygame=True, metrics_vis=None):
+def train_sarsa(env, metrics, use_pygame=False, metrics_vis=None, pygame_vis=None):
     """Train SARSA agent."""
+    agent_logger.info("Initializing SARSA agent")
     agent = SarsaAgent(env, SARSA_AGENT_CONFIG)
     goal = tuple(env.config["goal_pos"])
     num_episodes = SARSA_AGENT_CONFIG["num_episodes"]
     
-    pygame_vis = PyGameVisualizer() if use_pygame else None
+    agent_logger.debug(f"SARSA parameters: alpha={SARSA_AGENT_CONFIG['alpha']}, "
+                      f"gamma={SARSA_AGENT_CONFIG['gamma']}, epsilon={SARSA_AGENT_CONFIG['epsilon']}")
     
     for ep in range(num_episodes):
         obs = env.reset()
@@ -439,8 +607,11 @@ def train_sarsa(env, metrics, use_pygame=True, metrics_vis=None):
         agent.decay_epsilon()
         
         if ep % 10 == 0:
-            print(f"[SARSA] Episode {ep}/{num_episodes} | Reward: {total_reward:.2f}, Steps: {steps}")
+            agent_logger.info(f"SARSA Episode {ep}/{num_episodes} | "
+                             f"Reward: {total_reward:.2f}, Steps: {steps}, "
+                             f"Epsilon: {agent.epsilon:.3f}")
     
+    agent_logger.info(f"SARSA training completed - {num_episodes} episodes")
     return agent, None
 
 def update_dqn(batch, online_model, target_model, optimizer, gamma):
@@ -476,8 +647,9 @@ def update_dqn(batch, online_model, target_model, optimizer, gamma):
     loss.backward()
     optimizer.step()
 
-def train_dqn(env, metrics, use_pygame=True, metrics_vis=None):
+def train_dqn(env, metrics, use_pygame=False, metrics_vis=None, pygame_vis=None):
     """Train DQN agent."""
+    agent_logger.info("Initializing DQN agent")
     num_episodes = DQN_AGENT_CONFIG["num_episodes"]
     max_steps = DQN_AGENT_CONFIG["max_steps"]
     
@@ -486,6 +658,9 @@ def train_dqn(env, metrics, use_pygame=True, metrics_vis=None):
     state = unwrap_state(state)
     state_size = np.array(state).size
     action_size = env.action_space.n
+    
+    agent_logger.debug(f"DQN parameters: state_size={state_size}, action_size={action_size}, "
+                      f"hidden_dim={DQN_AGENT_CONFIG['hidden_dim']}, lr={DQN_AGENT_CONFIG['learning_rate']}")
     
     # Initialize models
     online_model = DQN(state_size, action_size, hidden_dim=DQN_AGENT_CONFIG["hidden_dim"]).to(DEVICE)
@@ -503,8 +678,6 @@ def train_dqn(env, metrics, use_pygame=True, metrics_vis=None):
     batch_size = DQN_AGENT_CONFIG["batch_size"]
     sync_freq = DQN_AGENT_CONFIG["sync_frequency"]
     gamma = DQN_AGENT_CONFIG["gamma"]
-    
-    pygame_vis = PyGameVisualizer() if use_pygame else None
     goal = tuple(env.config["goal_pos"])
     
     for ep in range(num_episodes):
@@ -549,8 +722,11 @@ def train_dqn(env, metrics, use_pygame=True, metrics_vis=None):
             metrics_vis.update(metrics)
         
         if ep % 10 == 0:
-            print(f"[DQN] Episode {ep} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.3f}")
+            agent_logger.info(f"DQN Episode {ep}/{num_episodes} | "
+                             f"Reward: {total_reward:.2f}, Steps: {steps}, "
+                             f"Epsilon: {epsilon:.3f}")
     
+    agent_logger.info(f"DQN training completed - {num_episodes} episodes")
     return None, online_model
 
 # ===================== COMMAND LINE INTERFACE =====================
@@ -578,14 +754,17 @@ def parse_args():
 
 # ===================== VISUALIZATION SELECTION =====================
 def select_visualization_backend():
+    main_logger.info("Requesting visualization backend selection")
     print("\nSelect visualization backend:")
     print("1. Matplotlib (static/animated plots, no live dashboard)")
     print("2. Pygame (interactive visualization)")
     while True:
         choice = input("Enter 1 or 2: ").strip()
         if choice == "1":
+            main_logger.info("Matplotlib backend selected")
             return "matplotlib"
         elif choice == "2":
+            main_logger.info("Pygame backend selected")
             return "pygame"
         else:
             print("Invalid input. Please enter 1 or 2.")
@@ -600,8 +779,10 @@ def main():
     2. Thread-safe Matplotlib visualization prevents conflicts with PyGame
     3. All code is self-contained in this single file
     4. Clear error handling and resource cleanup
+    5. Production-grade logging throughout
     """
     try:
+        main_logger.info("Starting GridWorld RL application")
         backend = select_visualization_backend()
         
         # Parse command line arguments
@@ -631,6 +812,8 @@ def main():
                 else:
                     print("[ERROR] Invalid selection. Please choose a valid agent.")
         
+        main_logger.info(f"Agent selected: {agent_type}")
+        
         # Get number of episodes
         num_episodes = args.episodes
         if not num_episodes:
@@ -641,7 +824,7 @@ def main():
                 else:
                     num_episodes = 50
             except ValueError:
-                print("[WARN] Invalid episode count. Using default value.")
+                main_logger.warning("Invalid episode count provided, using default value")
                 num_episodes = 50
         
         # Update config with selected episodes
@@ -651,6 +834,9 @@ def main():
             QL_AGENT_CONFIG["num_episodes"] = num_episodes
         elif agent_type == "sarsa":
             SARSA_AGENT_CONFIG["num_episodes"] = num_episodes
+        
+        main_logger.info(f"Training configuration: episodes={num_episodes}, "
+                        f"visualization={'Pygame' if use_pygame else 'Matplotlib'}")
         
         print(f"\n✓ Selected: {agent_type.upper()} agent")
         print(f"✓ Episodes: {num_episodes}")
@@ -664,46 +850,56 @@ def main():
         input("\nPress Enter to begin training...")
         
         # ===== NOW INITIALIZE EVERYTHING FOR TRAINING =====
-        print(f"\n🚀 Starting {agent_type.upper()} training...")
+        main_logger.info(f"Starting {agent_type.upper()} training...")
         
         # Initialize environment and metrics
         env = GridWorldEnv(config=DEFAULT_ENV_CONFIG)
         metrics = initialize_metrics()
         
+        # Initialize visualizers based on selected backend
+        try:
+            visualizer, metrics_vis, use_pygame = initialize_visualization(backend, agent_type, metrics)
+        except ImportError as e:
+            main_logger.error(f"Visualization initialization failed: {e}")
+            print(f"Error: {e}")
+            print("Falling back to no visualization.")
+            visualizer, metrics_vis, use_pygame = None, None, False
+        
         agent, model = None, None
         
-        # Only import and use the selected backend
-        if backend == "matplotlib":
-            from utils.plotting import GridWorldVisualizer, MetricsVisualizer
-            # Train agent without PyGame visualizer
-            if agent_type == "dqn":
-                agent, model = train_dqn(env, metrics, use_pygame=False, metrics_vis=None)
-            elif agent_type == "q_learning":
-                agent, model = train_q_learning(env, metrics, use_pygame=False, metrics_vis=None)
-            elif agent_type == "sarsa":
-                agent, model = train_sarsa(env, metrics, use_pygame=False, metrics_vis=None)
-            # After training, show static/animated matplotlib plots
-            vis = GridWorldVisualizer()
-            vis.plot_gridworld(env, agent=agent, episode=num_episodes)
-            metrics_vis = MetricsVisualizer(agent_type.upper())
-            metrics_vis.update(metrics)
-            metrics_vis.save("metrics_matplotlib.png")
-            print("Matplotlib plots saved as 'metrics_matplotlib.png'.")
+        # Train with the selected agent type
+        if agent_type == "dqn":
+            agent, model = train_dqn(env, metrics, use_pygame=use_pygame, 
+                                     metrics_vis=metrics_vis, pygame_vis=visualizer if use_pygame else None)
+        elif agent_type == "q_learning":
+            agent, model = train_q_learning(env, metrics, use_pygame=use_pygame, 
+                                           metrics_vis=metrics_vis, pygame_vis=visualizer if use_pygame else None)
+        elif agent_type == "sarsa":
+            agent, model = train_sarsa(env, metrics, use_pygame=use_pygame, 
+                                      metrics_vis=metrics_vis, pygame_vis=visualizer if use_pygame else None)
+            
+        # Post-training visualization based on backend
+        if backend == "matplotlib" and visualizer is not None:
+            # For matplotlib: render gridworld visualization after training
+            vis_logger.info("Generating post-training visualizations")
+            visualizer.plot_gridworld(env, agent=agent, episode=num_episodes)
+            if metrics_vis:
+                metrics_vis.update(metrics)
+                metrics_vis.save("metrics_matplotlib.png")
+                main_logger.info("Matplotlib plots saved as 'metrics_matplotlib.png'")
+            
+            # Save detailed training metrics to CSV and enhanced plots
+            csv_path = save_metrics_to_csv(metrics, agent_type, logs_dir='models/logs')
+            plot_path = generate_enhanced_plot(metrics, agent_type, logs_dir='models/logs')
+            main_logger.info(f"Enhanced metrics saved to models/logs/ directory")
+            
             input("Press Enter to exit...")
         elif backend == "pygame":
-            from utils.game_visual import GridWorldVisualizer as PyGameVisualizer
-            # Train agent with PyGame visualizer
-            if agent_type == "dqn":
-                agent, model = train_dqn(env, metrics, use_pygame=True, metrics_vis=None)
-            elif agent_type == "q_learning":
-                agent, model = train_q_learning(env, metrics, use_pygame=True, metrics_vis=None)
-            elif agent_type == "sarsa":
-                agent, model = train_sarsa(env, metrics, use_pygame=True, metrics_vis=None)
-            # After training, optionally run PyGame visualization (if not already shown during training)
-            # (You can add a summary visualization here if desired)
+            # PyGame visualization happens during training, nothing extra needed here
+            pass
         
         # ===== TRAINING COMPLETE =====
-        print(f"\n✅ {agent_type.upper()} training completed!")
+        main_logger.info(f"{agent_type.upper()} training completed successfully!")
         
         # Print summary statistics
         print("\n" + "="*50)
@@ -714,6 +910,10 @@ def main():
             avg_steps = np.mean(metrics['steps'])
             success_rate = np.mean(metrics['successes'])
             
+            # Log detailed statistics
+            main_logger.info(f"Training summary - Avg Reward: {avg_reward:.2f}, "
+                           f"Avg Steps: {avg_steps:.2f}, Success Rate: {success_rate:.2%}")
+            
             print(f"Average Reward:  {avg_reward:.2f}")
             print(f"Average Steps:   {avg_steps:.2f}")
             print(f"Success Rate:    {success_rate:.2%}")
@@ -722,52 +922,64 @@ def main():
             if len(metrics['rewards']) >= 10:
                 final_10_reward = np.mean(metrics['rewards'][-10:])
                 final_10_success = np.mean(metrics['successes'][-10:])
+                main_logger.info(f"Final 10 episodes - Reward: {final_10_reward:.2f}, "
+                               f"Success Rate: {final_10_success:.2%}")
                 print(f"\nFinal 10 episodes:")
                 print(f"  Average Reward: {final_10_reward:.2f}")
                 print(f"  Success Rate:   {final_10_success:.2%}")
                 
+            # For PyGame backend, we need to save metrics here
+            if backend == "pygame":
+                # Save detailed training metrics to CSV and enhanced plots
+                csv_path = save_metrics_to_csv(metrics, agent_type, logs_dir='models/logs')
+                plot_path = generate_enhanced_plot(metrics, agent_type, logs_dir='models/logs')
+                main_logger.info("Enhanced metrics saved to models/logs/ directory")
+                
         except Exception as summary_err:
-            print(f"[WARN] Could not compute summary stats: {summary_err}")
+            main_logger.error(f"Failed to compute summary statistics: {summary_err}")
         
         print("="*50)
         
         # Keep metrics visualization running
-        print(f"\n📊 Live metrics are being saved to '{metrics_vis.save_path}'")
-        print("You can view the updated plots by opening this file periodically.")
-        print("Training metrics will continue updating during training.")
-        print("Press Ctrl+C to exit.")
-        
-        # Wait for user to exit
-        try:
-            while metrics_vis.running:
-                time.sleep(1.0)
-        except KeyboardInterrupt:
-            pass
+        if metrics_vis:
+            print(f"\n📊 Live metrics are being saved to '{metrics_vis.save_path}'")
+            print("You can view the updated plots by opening this file periodically.")
+            print("Training metrics will continue updating during training.")
+            print("Press Ctrl+C to exit.")
+            
+            # Wait for user to exit
+            try:
+                while metrics_vis.running:
+                    time.sleep(1.0)
+            except KeyboardInterrupt:
+                pass
         
     except KeyboardInterrupt:
-        print("\n\n⚠️  Training interrupted by user.")
+        main_logger.warning("Training interrupted by user")
     except Exception as e:
-        print(f"\n[FATAL ERROR] Unhandled exception: {e}")
-        traceback.print_exc()
+        main_logger.critical(f"Unhandled exception: {e}", exc_info=True)
     finally:
         # ===== CLEANUP =====
-        print("\n🧹 Cleaning up resources...")
+        main_logger.info("Cleaning up resources...")
         
         # Stop metrics visualizer
         try:
-            if 'metrics_vis' in locals():
+            if 'metrics_vis' in locals() and metrics_vis is not None:
                 metrics_vis.stop()
-        except:
-            pass
+        except Exception as cleanup_err:
+            main_logger.error(f"Error stopping metrics visualizer: {cleanup_err}")
         
-        # Close Matplotlib properly
+        # Close Matplotlib properly if it was imported
         try:
-            plt.close('all')
-            plt.ioff()
-        except:
-            pass
+            if 'backend' in locals() and backend == "matplotlib":
+                import matplotlib.pyplot as plt
+                plt.close('all')
+                plt.ioff()
+        except Exception as cleanup_err:
+            main_logger.error(f"Error cleaning up matplotlib: {cleanup_err}")
         
-        print("✅ Cleanup complete. Goodbye!")
+        main_logger.info("GridWorld RL Training Session Ended")
+        main_logger.info("=" * 60)
 
 if __name__ == "__main__":
     main()

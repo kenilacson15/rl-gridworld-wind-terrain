@@ -2,6 +2,7 @@
 numpy
 scipy
 matplotlib
+pandas  # For data handling and CSV export
 
 torch  # PyTorch for deep RL agents
 
